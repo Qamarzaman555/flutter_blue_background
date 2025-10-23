@@ -1,18 +1,23 @@
-group 'com.sparkleo.flutter_blue_background.flutter_blue_background'
-version '1.0-SNAPSHOT'
-
 buildscript {
-    ext.kotlin_version = '1.7.10'
+    ext.kotlin_version = '1.9.20'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.0'
+        classpath 'com.android.tools.build:gradle:8.1.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
+
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+}
+
+group 'com.sparkleo.flutter_blue_background.flutter_blue_background'
+version '1.0-SNAPSHOT'
 
 allprojects {
     repositories {
@@ -21,19 +26,26 @@ allprojects {
     }
 }
 
-apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
-
 android {
-    compileSdkVersion 31
+    namespace 'com.sparkleo.flutter_blue_background.flutter_blue_background'
+    compileSdkVersion 34
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
         jvmTarget = '1.8'
+    }
+
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+
+    buildFeatures {
+        buildConfig false
     }
 
     sourceSets {
@@ -42,12 +54,8 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 16
-    }
-
-    dependencies {
-        testImplementation 'org.jetbrains.kotlin:kotlin-test'
-        testImplementation 'org.mockito:mockito-core:5.0.0'
+        minSdkVersion 21
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     testOptions {
@@ -61,4 +69,11 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.7.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+    testImplementation 'org.mockito:mockito-core:5.0.0'
 }

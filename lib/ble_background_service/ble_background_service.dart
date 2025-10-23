@@ -8,10 +8,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-
-
 Future<void> initializeService() async {
-
   final service = FlutterBackgroundService();
 
   /// OPTIONAL, using custom notification channel id
@@ -19,12 +16,12 @@ Future<void> initializeService() async {
     'my_foreground', // id
     'MY FOREGROUND SERVICE', // title
     description:
-    'This channel is used for important notifications.', // description
+        'This channel is used for important notifications.', // description
     importance: Importance.low, // importance must be at low or higher level
   );
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-  FlutterLocalNotificationsPlugin();
+      FlutterLocalNotificationsPlugin();
 
   if (Platform.isIOS || Platform.isAndroid) {
     await flutterLocalNotificationsPlugin.initialize(
@@ -37,7 +34,7 @@ Future<void> initializeService() async {
 
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<
-      AndroidFlutterLocalNotificationsPlugin>()
+          AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   await service.configure(
@@ -97,7 +94,7 @@ void onStart(ServiceInstance service) async {
 
   /// OPTIONAL when use custom notification
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-  FlutterLocalNotificationsPlugin();
+      FlutterLocalNotificationsPlugin();
 
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
@@ -122,44 +119,43 @@ void onStart(ServiceInstance service) async {
   StreamSubscription? subscription;
   StreamSubscription? subscriptionConnection;
   List<String> receivedDataList = <String>[];
-   String deviceName = "";
-   String serviceUuid = "";
-   String sendCharacteristicUuid = "";
-   String receiveCharacteristicUuid = "";
-   String dataForWrite = "";
-   List<int> readValue = [];
-
+  String deviceName = "";
+  String serviceUuid = "";
+  String sendCharacteristicUuid = "";
+  String receiveCharacteristicUuid = "";
+  String dataForWrite = "";
+  List<int> readValue = [];
 
   SharedPreferences getMethodsCall = await SharedPreferences.getInstance();
   await getMethodsCall.reload();
 
-
   // This is getting values for scanning and connecting of specific device
-  final connectToDevice = getMethodsCall.getStringList('connectToDevice') ?? <String>[];
+  final connectToDevice =
+      getMethodsCall.getStringList('connectToDevice') ?? <String>[];
   deviceName = connectToDevice[1];
   serviceUuid = connectToDevice[2];
 
   // This is getting values to write value on specific device
   final writeData = getMethodsCall.getStringList('writeData') ?? <String>[];
-  if(writeData.isNotEmpty){
+  if (writeData.isNotEmpty) {
     sendCharacteristicUuid = writeData[1];
     dataForWrite = writeData[2];
   }
 
   // This is getting values to read value on specific device
   final readData = getMethodsCall.getStringList('readData') ?? <String>[];
-  if(readData.isNotEmpty){
+  if (readData.isNotEmpty) {
     receiveCharacteristicUuid = readData[1];
   }
 
   // writeCharacteristic will write value on specific characteristic
   void writeCharacteristic(String command) async {
-    for(var serv in gBleServices){
-      if(serv.uuid.toString() == serviceUuid){
+    for (var serv in gBleServices) {
+      if (serv.uuid.toString() == serviceUuid) {
         debugPrint("service match ${serv.uuid.toString()}");
         //service = serv;
-        for(var char in serv.characteristics){
-          if(char.uuid.toString() == sendCharacteristicUuid){
+        for (var char in serv.characteristics) {
+          if (char.uuid.toString() == sendCharacteristicUuid) {
             debugPrint("char match ${char.uuid.toString()}");
             List<int> bytes = command.codeUnits;
             debugPrint("bytes are $bytes");
@@ -183,31 +179,33 @@ void onStart(ServiceInstance service) async {
               debugPrint("Canceling stream");
               subscription!.cancel();
             }
-            if(char.properties.notify == true){
+            if (char.properties.notify == true) {
               await char.setNotifyValue(true);
               subscription = char.onValueReceived.listen((value) async {
                 debugPrint("received value is $value");
-                SharedPreferences preferences = await SharedPreferences.getInstance();
+                SharedPreferences preferences =
+                    await SharedPreferences.getInstance();
                 await preferences.reload();
-                final log = preferences.getStringList('getReadData') ?? <String>[];
+                final log =
+                    preferences.getStringList('getReadData') ?? <String>[];
                 log.add(value.toString());
               });
-            }else{
+            } else {
               readValue = await char.read();
               debugPrint("read value is  $readValue");
-              SharedPreferences preferences = await SharedPreferences.getInstance();
+              SharedPreferences preferences =
+                  await SharedPreferences.getInstance();
               await preferences.reload();
-              final log = preferences.getStringList('getReadData') ?? <String>[];
+              final log =
+                  preferences.getStringList('getReadData') ?? <String>[];
               log.add(readValue.toString());
               await preferences.setStringList('getReadData', log);
             }
-
           }
         }
       }
     }
   }
-
 
   // scanningMethod() will scan devices and connect to specific device
   Future<void> scanningMethod() async {
@@ -220,74 +218,73 @@ void onStart(ServiceInstance service) async {
     //Empty the Devices List before storing new value
     scannedDevicesList = [];
     gBleServices.clear();
-   // servicesList.clear();
+    // servicesList.clear();
     receivedDataList.clear();
 
     await streamSubscription?.cancel();
+    debugPrint("[background service] scanningMethod");
 
-    streamSubscription = FlutterBluePlus.scanResults.listen((results) async {
-      for (ScanResult r in results) {
-        if (r.device.platformName.isNotEmpty && !scannedDevicesList.contains(r.device)) {
-          if(r.device.platformName == deviceName){
-            debugPrint("Device Name Matched ${r.device.platformName}");
-            await streamSubscription?.cancel();
-            scannedDevicesList.add(r.device);
-            gBleDevice = r.device;
+    streamSubscription = FlutterBluePlus.scanResults.listen(
+      (results) async {
+        for (ScanResult r in results) {
+          if (r.device.platformName.isNotEmpty &&
+              !scannedDevicesList.contains(r.device)) {
+            debugPrint("Device Name ${r.device.platformName}");
+            if (r.device.platformName == deviceName) {
+              debugPrint("Device Name Matched ${r.device.platformName}");
+              await streamSubscription?.cancel();
+              scannedDevicesList.add(r.device);
+              gBleDevice = r.device;
 
-            await FlutterBluePlus.stopScan();
-            try {
-              await gBleDevice!.disconnect();
-              await gBleDevice!.connect(autoConnect: false);
-            } catch (e) {
-              if (e.toString() != 'already_connected') {
+              await FlutterBluePlus.stopScan();
+              try {
                 await gBleDevice!.disconnect();
-              }
-            } finally {
-              gBleServices =
-              await gBleDevice!.discoverServices();
-              Future.delayed(const Duration(milliseconds: 500), () async {
-                if (Platform.isAndroid) {
-                  await gBleDevice!.requestMtu(200);
+                await gBleDevice!.connect(autoConnect: false);
+              } catch (e) {
+                if (e.toString() != 'already_connected') {
+                  await gBleDevice!.disconnect();
                 }
-              });
-              Future.delayed(Duration.zero, () {
-                debugPrint('Device Connected');
-                //receiveCommandFromFirmware();
-                if(writeData.isNotEmpty){
-                  writeCharacteristic(dataForWrite);
-                }
-                if(readData.isNotEmpty){
-                  receiveCommandFromFirmware();
-                }
-                subscriptionConnection = gBleDevice?.connectionState.listen((BluetoothConnectionState state) async {
-                  if (state == BluetoothConnectionState.disconnected) {
-                    // 1. typically, start a periodic timer that tries to
-                    //    reconnect, or just call connect() again right now
-                    // 2. you must always re-discover services after disconnection!
-                    debugPrint("${gBleDevice?.platformName} is disconnected");
-                    subscription!.cancel();
-                    scanningMethod();
-                    subscriptionConnection!.cancel();
+              } finally {
+                gBleServices = await gBleDevice!.discoverServices();
+                Future.delayed(const Duration(milliseconds: 500), () async {
+                  if (Platform.isAndroid) {
+                    await gBleDevice!.requestMtu(200);
                   }
                 });
-              });
+                Future.delayed(Duration.zero, () {
+                  debugPrint('Device Connected');
+                  //receiveCommandFromFirmware();
+                  if (writeData.isNotEmpty) {
+                    writeCharacteristic(dataForWrite);
+                  }
+                  if (readData.isNotEmpty) {
+                    receiveCommandFromFirmware();
+                  }
+                  subscriptionConnection = gBleDevice?.connectionState
+                      .listen((BluetoothConnectionState state) async {
+                    if (state == BluetoothConnectionState.disconnected) {
+                      // 1. typically, start a periodic timer that tries to
+                      //    reconnect, or just call connect() again right now
+                      // 2. you must always re-discover services after disconnection!
+                      debugPrint("${gBleDevice?.platformName} is disconnected");
+                      subscription!.cancel();
+                      scanningMethod();
+                      subscriptionConnection!.cancel();
+                    }
+                  });
+                });
+              }
             }
           }
         }
-      }
-    },
+      },
     );
     await FlutterBluePlus.startScan();
   }
 
-
-  if(connectToDevice.isNotEmpty){
+  if (connectToDevice.isNotEmpty) {
     scanningMethod();
   }
-
-
-
-
 
   // bring to foreground
   Timer.periodic(const Duration(seconds: 2), (timer) async {
@@ -319,10 +316,6 @@ void onStart(ServiceInstance service) async {
 
     /// you can see this log in logcat
     //debugPrint('FLUTTER BACKGROUND SERVICE: ${DateTime.now()}');
-
-
-
-
 
     service.invoke(
       'update',

@@ -1,24 +1,21 @@
-
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ble_background_service/ble_background_service.dart';
-
-
+import 'models/ble_config.dart';
+import 'models/ble_callbacks.dart';
+import 'models/ble_data.dart';
+import 'services/generic_ble_service.dart';
 
 class FlutterBlueBackground {
-
-  static const MethodChannel _channel =
-    MethodChannel('ios_back_plugin');
-
+  static const MethodChannel _channel = MethodChannel('ios_back_plugin');
 
   static Future<String?> getPlatformVersion() async {
     final version = await _channel.invokeMethod<String>('getBatteryLevel');
     return version;
   }
-
 
   static Future<void> setLog() async {
     SharedPreferences preferences = await SharedPreferences.getInstance();
@@ -28,53 +25,47 @@ class FlutterBlueBackground {
     await preferences.setStringList('log', log);
   }
 
-
   static Future<void> stopFlutterBackgroundService() async {
     final service = FlutterBackgroundService();
     var isRunning = await service.isRunning();
     if (isRunning) {
       service.invoke("stopService");
+    } else {}
+  }
+
+  // This Function will start or initialize background service in ios and android
+  static Future<void> startFlutterBackgroundService() async {
+    if (Platform.isAndroid) {
+      try {
+        await initializeService();
+        // backgroundFunction!();
+      } catch (e) {
+        // print("Error executing in the background: $e");
+      }
     } else {
+      // try {
+      //   await _channel.invokeMethod('executeInBackground');
+      //   backgroundFunction!();
+      // } catch (e) {
+      //   // print("Error executing in the background: $e");
+      // }
     }
   }
 
-
-  // This Function will start or initialize background service in ios and android
-  static Future<void> startFlutterBackgroundService(Function()? backgroundFunction) async {
-    if(Platform.isAndroid){
-      try {
-        // await initializeService();
-        backgroundFunction!();
-      } catch (e) {
-        // print("Error executing in the background: $e");
-      }
-    }else{
-      try {
-        await _channel.invokeMethod('executeInBackground');
-        backgroundFunction!();
-      } catch (e) {
-        // print("Error executing in the background: $e");
-      }
-    }
-
-    }
-
-  static Future<void> initialize() async {
-    if(Platform.isAndroid){
+  static Future<void> initializeLegacy() async {
+    if (Platform.isAndroid) {
       await initializeService();
-    }else{
+    } else {
       await _channel.invokeMethod('executeInBackground');
     }
   }
 
-
   // This method will write data on specific characteristic
-  static Future<void> connectToDevice({
-    required String deviceName,
-    required String serviceUuid,
-    required String characteristicUuid
-  }) async {
-    if(Platform.isAndroid){
+  static Future<void> connectToDevice(
+      {required String deviceName,
+      required String serviceUuid,
+      required String characteristicUuid}) async {
+    if (Platform.isAndroid) {
       SharedPreferences preferences = await SharedPreferences.getInstance();
       await preferences.reload();
       final log = preferences.getStringList('connectToDevice') ?? <String>[];
@@ -85,14 +76,13 @@ class FlutterBlueBackground {
       log.add(characteristicUuid);
       await preferences.setStringList('connectToDevice', log);
       await initializeService();
-    }else{
+    } else {
       await _channel.invokeMethod('connectToDevice', {
         'deviceName': deviceName,
         'serviceUuid': serviceUuid,
         'characteristicUuid': characteristicUuid,
       });
     }
-
   }
   // static Future<void> connectToDevice() async {
   //   await _channel.invokeMethod('connectToDevice');
@@ -106,13 +96,10 @@ class FlutterBlueBackground {
   //   await _channel.invokeMethod('readData');
   // }
 
-
   // This method will read data on specific characteristic
-  static Future<String?> readData({
-    String? serviceUuid,
-    required String characteristicUuid
-  }) async {
-    if(Platform.isAndroid){
+  static Future<String?> readData(
+      {String? serviceUuid, required String characteristicUuid}) async {
+    if (Platform.isAndroid) {
       SharedPreferences preferences = await SharedPreferences.getInstance();
       await preferences.reload();
       final log = preferences.getStringList('readData') ?? <String>[];
@@ -121,10 +108,10 @@ class FlutterBlueBackground {
       log.add(characteristicUuid);
       await preferences.setStringList('readData', log);
       return "";
-    }else{
+    } else {
       final result = await _channel.invokeMethod('readData', {
-        'serviceUuid' : serviceUuid,
-        'characteristicUuid' : characteristicUuid
+        'serviceUuid': serviceUuid,
+        'characteristicUuid': characteristicUuid
       });
 
       // Assuming that the result is a String, you can replace String with the actual type.
@@ -132,16 +119,13 @@ class FlutterBlueBackground {
     }
   }
 
-
-
-
   // This method will write data on specific characteristic
   static Future<void> writeData({
     String? serviceUuid,
     required String characteristicUuid,
     required String data,
   }) async {
-    if(Platform.isAndroid){
+    if (Platform.isAndroid) {
       SharedPreferences preferences = await SharedPreferences.getInstance();
       await preferences.reload();
       final log = preferences.getStringList('writeData') ?? <String>[];
@@ -150,11 +134,11 @@ class FlutterBlueBackground {
       log.add(characteristicUuid);
       log.add(data);
       await preferences.setStringList('writeData', log);
-    }else{
+    } else {
       try {
         await _channel.invokeMethod('writeData', {
-          'serviceUuid' : serviceUuid,
-          'characteristicUuid' : characteristicUuid,
+          'serviceUuid': serviceUuid,
+          'characteristicUuid': characteristicUuid,
           'data': data
         });
       } catch (e) {
@@ -162,8 +146,6 @@ class FlutterBlueBackground {
       }
     }
   }
-
-
 
   // This method will delete all the data which is stored on the result of read characteristic
   static Future<void> clearReadStorage() async {
@@ -191,10 +173,58 @@ class FlutterBlueBackground {
     }
   }
 
+  // ===== NEW GENERIC METHODS =====
 
+  /// Initialize the BLE background service with configuration and callbacks
+  static Future<void> initialize({
+    required BleConfig config,
+    BleCallbacks? callbacks,
+  }) async {
+    await GenericBleService.initialize(
+      config: config,
+      callbacks: callbacks,
+    );
+  }
 
+  /// Start the BLE background service
+  static Future<void> start() async {
+    await GenericBleService.start();
+  }
 
+  /// Stop the BLE background service
+  static Future<void> stop() async {
+    await GenericBleService.stop();
+  }
+
+  /// Check if the BLE background service is running
+  static Future<bool> isRunning() async {
+    return await GenericBleService.isRunning();
+  }
+
+  /// Send data to the connected BLE device
+  static Future<void> sendData(String data) async {
+    await GenericBleService.sendData(data);
+  }
+
+  /// Get received data from BLE device
+  static Future<List<BleData>> getReceivedData() async {
+    return await GenericBleService.getReceivedData();
+  }
+
+  /// Clear received data storage
+  static Future<void> clearReceivedData() async {
+    await GenericBleService.clearReceivedData();
+  }
+
+  /// Get battery data
+  static Future<List<BatteryData>> getBatteryData() async {
+    return await GenericBleService.getBatteryData();
+  }
+
+  /// Get service status
+  static Future<ServiceStatusData> getServiceStatus() async {
+    return await GenericBleService.getServiceStatus();
+  }
+
+  // ===== LEGACY METHODS (DEPRECATED) =====
 }
-
-
-
