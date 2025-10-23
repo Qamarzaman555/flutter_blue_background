@@ -68,6 +68,15 @@ class GenericBleService {
   static Future<void> stop() async {
     debugPrint('[BG] Stopping background service...');
     final service = FlutterBackgroundService();
+
+    // Check if service is running first
+    final isRunning = await service.isRunning();
+    if (!isRunning) {
+      debugPrint('[BG] Service is not running, nothing to stop');
+      return;
+    }
+
+    debugPrint('[BG] Service is running, stopping it now');
     service.invoke('stopService');
     debugPrint('[BG] Background service stop command sent');
   }
@@ -338,11 +347,7 @@ class GenericBleService {
     // Cleanup on service stop
     debugPrint('[BG] Setting up service stop handler...');
     service.on('stopService').listen((event) {
-      debugPrint('[BG] Service stop requested - cleaning up...');
-      // Cancel notification timer
-      notificationTimer?.cancel();
-      debugPrint('[BG] Notification timer cancelled');
-      // Cleanup will be handled by the service itself
+      service.stopSelf();
     });
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:flutter_blue_background/models/ble_config.dart';
@@ -176,6 +177,9 @@ class _MyHomePageState extends State<MyHomePage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Service stopped')));
+
+      // Wait a moment for the service to actually stop
+      await Future.delayed(const Duration(milliseconds: 500));
       await _checkServiceStatus();
     } catch (e) {
       ScaffoldMessenger.of(
@@ -362,8 +366,8 @@ class _MyHomePageState extends State<MyHomePage> {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _isServiceRunning ? _sendData : null,
-                    child: const Text('Send Data'),
+                    onPressed: _checkServiceStatus,
+                    child: const Text('Refresh Status'),
                   ),
                 ),
                 const SizedBox(width: 8),
