@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../models/ble_callbacks.dart';
 import '../models/ble_data.dart';
 
 /// Generic BLE background service
+@pragma('vm:entry-point')
 class GenericBleService {
   static const String _configKey = 'ble_config';
   static const String _dataKey = 'ble_data';
@@ -24,94 +26,143 @@ class GenericBleService {
     required BleConfig config,
     BleCallbacks? callbacks,
   }) async {
+    debugPrint('[BG] Initializing BLE background service...');
+    debugPrint(
+        '[BG] Config: Service=${config.serviceUuid}, Device=${config.deviceName}');
+
     _config = config;
     _prefs = await SharedPreferences.getInstance();
+    debugPrint('[BG] SharedPreferences initialized');
 
     // Save configuration
-    await _prefs!.setString(_configKey, config.toJson().toString());
+    await _prefs!.setString(_configKey, jsonEncode(config.toJson()));
+    debugPrint('[BG] Configuration saved to SharedPreferences');
 
     // Initialize background service
     await _initializeBackgroundService();
+    debugPrint('[BG] BLE background service initialization completed');
   }
 
   /// Start the background service
   static Future<void> start() async {
+    debugPrint('[BG] Starting background service...');
+
     if (_config == null) {
+      debugPrint(
+          '[BG] ERROR: Service not initialized. Call initialize() first.');
       throw Exception('Service not initialized. Call initialize() first.');
     }
 
     final service = FlutterBackgroundService();
+    debugPrint('[BG] FlutterBackgroundService instance created');
 
     // Add a small delay to ensure notification channel is ready
+    debugPrint('[BG] Waiting for notification channel to be ready...');
     await Future.delayed(const Duration(milliseconds: 500));
 
     await service.startService();
+    debugPrint('[BG] Background service started successfully');
   }
 
   /// Stop the background service
   static Future<void> stop() async {
+    debugPrint('[BG] Stopping background service...');
     final service = FlutterBackgroundService();
     service.invoke('stopService');
+    debugPrint('[BG] Background service stop command sent');
   }
 
   /// Check if service is running
   static Future<bool> isRunning() async {
+    debugPrint('[BG] Checking if background service is running...');
     final service = FlutterBackgroundService();
-    return await service.isRunning();
+    final running = await service.isRunning();
+    debugPrint('[BG] Service running status: $running');
+    return running;
   }
 
   /// Send data to device
   static Future<void> sendData(String data) async {
+    debugPrint('[BG] Sending data to device: ${data.length} characters');
     if (_prefs != null) {
       await _prefs!.setString('send_data', data);
       await _prefs!.setBool('send_data_flag', true);
+      debugPrint('[BG] Data saved to SharedPreferences for background service');
+    } else {
+      debugPrint('[BG] WARNING: SharedPreferences not initialized');
     }
   }
 
   /// Get received data
   static Future<List<BleData>> getReceivedData() async {
-    if (_prefs == null) return [];
+    debugPrint('[BG] Retrieving received data...');
+    if (_prefs == null) {
+      debugPrint(
+          '[BG] WARNING: SharedPreferences not initialized, returning empty list');
+      return [];
+    }
 
     final dataList = _prefs!.getStringList(_dataKey) ?? [];
-    return dataList
+    final bleData = dataList
         .map((json) => BleData.fromJson(json as Map<String, dynamic>))
         .toList();
+    debugPrint('[BG] Retrieved ${bleData.length} data entries');
+    return bleData;
   }
 
   /// Clear received data
   static Future<void> clearReceivedData() async {
+    debugPrint('[BG] Clearing received data...');
     if (_prefs != null) {
       await _prefs!.remove(_dataKey);
+      debugPrint('[BG] Received data cleared from SharedPreferences');
+    } else {
+      debugPrint('[BG] WARNING: SharedPreferences not initialized');
     }
   }
 
   /// Get battery data
   static Future<List<BatteryData>> getBatteryData() async {
-    if (_prefs == null) return [];
+    debugPrint('[BG] Retrieving battery data...');
+    if (_prefs == null) {
+      debugPrint(
+          '[BG] WARNING: SharedPreferences not initialized, returning empty list');
+      return [];
+    }
 
     final dataList = _prefs!.getStringList('battery_data') ?? [];
-    return dataList
+    final batteryData = dataList
         .map((json) => BatteryData.fromJson(json as Map<String, dynamic>))
         .toList();
+    debugPrint('[BG] Retrieved ${batteryData.length} battery data entries');
+    return batteryData;
   }
 
   /// Get service status
   static Future<ServiceStatusData> getServiceStatus() async {
+    debugPrint('[BG] Getting service status...');
     final service = FlutterBackgroundService();
     final isRunning = await service.isRunning();
 
-    return ServiceStatusData(
+    final status = ServiceStatusData(
       isRunning: isRunning,
       isForeground: false, // This would need to be implemented differently
       lastUpdate: DateTime.now(),
     );
+
+    debugPrint(
+        '[BG] Service status: Running=$isRunning, LastUpdate=${status.lastUpdate}');
+    return status;
   }
 
   /// Initialize background service
   static Future<void> _initializeBackgroundService() async {
+    debugPrint('[BG] Initializing background service configuration...');
     final service = FlutterBackgroundService();
     final config = _config!;
     final notificationConfig = config.notificationConfig;
+    debugPrint(
+        '[BG] Notification config: Channel=${notificationConfig.channelId}, Title=${notificationConfig.title}');
 
     // Create notification channel
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -139,7 +190,9 @@ class GenericBleService {
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
+    debugPrint('[BG] Notification channel created');
 
+    debugPrint('[BG] Configuring FlutterBackgroundService...');
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
@@ -156,16 +209,20 @@ class GenericBleService {
         onBackground: _onIosBackground,
       ),
     );
+    debugPrint('[BG] FlutterBackgroundService configuration completed');
   }
 
   /// iOS background handler
   @pragma('vm:entry-point')
   static Future<bool> _onIosBackground(ServiceInstance service) async {
+    debugPrint('[BG] iOS background handler started');
     WidgetsFlutterBinding.ensureInitialized();
     DartPluginRegistrant.ensureInitialized();
+    debugPrint('[BG] iOS Flutter binding and plugin registrant initialized');
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
+    debugPrint('[BG] iOS SharedPreferences reloaded');
     final log = prefs.getStringList('log') ?? <String>[];
     log.add(DateTime.now().toIso8601String());
     await prefs.setStringList('log', log);
@@ -176,36 +233,49 @@ class GenericBleService {
   /// Main service start handler
   @pragma('vm:entry-point')
   static void _onStart(ServiceInstance service) async {
+    debugPrint('[BG] Background service started - _onStart called');
     DartPluginRegistrant.ensureInitialized();
+    debugPrint('[BG] Dart plugin registrant initialized');
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
+    debugPrint('[BG] SharedPreferences reloaded in background service');
 
     // Load configuration
+    debugPrint('[BG] Loading configuration from SharedPreferences...');
     final configJson = prefs.getString(_configKey);
     if (configJson == null) {
-      print('[BLE Service] No configuration found');
+      debugPrint('[BG] ERROR: No configuration found in SharedPreferences');
       return;
     }
+    debugPrint('[BG] Configuration loaded successfully');
 
-    final config = BleConfig.fromJson(configJson as Map<String, dynamic>);
+    final configMap = jsonDecode(configJson) as Map<String, dynamic>;
+    final config = BleConfig.fromJson(configMap);
     final notificationConfig = config.notificationConfig;
 
     // Initialize notification plugin
+    debugPrint(
+        '[BG] Initializing notification plugin in background service...');
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
         FlutterLocalNotificationsPlugin();
 
     if (service is AndroidServiceInstance) {
+      debugPrint(
+          '[BG] Android service instance detected, setting up foreground service');
       service.on('setAsForeground').listen((event) {
+        debugPrint('[BG] Setting service as foreground');
         service.setAsForegroundService();
       });
 
       service.on('setAsBackground').listen((event) {
+        debugPrint('[BG] Setting service as background');
         service.setAsBackgroundService();
       });
     }
 
     // BLE variables
+    debugPrint('[BG] Initializing BLE variables...');
     List<BluetoothDevice> scannedDevicesList = <BluetoothDevice>[];
     StreamSubscription? streamSubscription;
     BluetoothDevice? connectedDevice;
@@ -213,19 +283,26 @@ class GenericBleService {
     StreamSubscription? dataSubscription;
     StreamSubscription? connectionSubscription;
     bool isDeviceConnected = false;
+    debugPrint('[BG] BLE variables initialized');
 
     // Battery monitoring variables
+    debugPrint('[BG] Initializing battery monitoring variables...');
     Timer? notificationTimer;
     int batteryLevel = 0;
     String batteryState = 'unknown';
     double mah = 0.0;
+    debugPrint('[BG] Battery monitoring variables initialized');
 
     // Initialize battery monitoring if enabled
     if (config.enableBatteryMonitoring) {
+      debugPrint('[BG] Battery monitoring enabled, initializing...');
       await _initializeBatteryMonitoring(config, prefs);
+    } else {
+      debugPrint('[BG] Battery monitoring disabled');
     }
 
     // Start scanning for devices
+    debugPrint('[BG] Starting BLE device scanning...');
     await _startScanning(
       config: config,
       scannedDevicesList: scannedDevicesList,
@@ -239,9 +316,12 @@ class GenericBleService {
     );
 
     // Start notification updates
+    debugPrint(
+        '[BG] Starting notification timer with ${notificationConfig.updateIntervalSeconds}s interval');
     notificationTimer = Timer.periodic(
       Duration(seconds: notificationConfig.updateIntervalSeconds),
       (timer) async {
+        debugPrint('[BG] Notification timer tick - updating notification');
         if (service is AndroidServiceInstance) {
           await _updateNotification(
             flutterLocalNotificationsPlugin,
@@ -256,9 +336,12 @@ class GenericBleService {
     );
 
     // Cleanup on service stop
+    debugPrint('[BG] Setting up service stop handler...');
     service.on('stopService').listen((event) {
+      debugPrint('[BG] Service stop requested - cleaning up...');
       // Cancel notification timer
       notificationTimer?.cancel();
+      debugPrint('[BG] Notification timer cancelled');
       // Cleanup will be handled by the service itself
     });
   }
@@ -268,9 +351,10 @@ class GenericBleService {
     BleConfig config,
     SharedPreferences prefs,
   ) async {
+    debugPrint('[BG] Initializing battery monitoring system...');
     // This would integrate with battery monitoring packages
     // For now, we'll set up the basic structure
-    print('[BLE Service] Battery monitoring initialized');
+    debugPrint('[BG] Battery monitoring system initialized');
   }
 
   /// Start scanning for devices
@@ -285,8 +369,13 @@ class GenericBleService {
     required bool isDeviceConnected,
     required SharedPreferences prefs,
   }) async {
+    debugPrint('[BG] Starting BLE device scanning process...');
+    debugPrint(
+        '[BG] Target device: ${config.deviceName}, Service: ${config.serviceUuid}');
+
     // Stop any ongoing scan
     if (FlutterBluePlus.isScanningNow) {
+      debugPrint('[BG] Stopping existing scan before starting new one');
       await FlutterBluePlus.stopScan();
     }
 
@@ -299,50 +388,69 @@ class GenericBleService {
     await dataSubscription?.cancel();
     await connectionSubscription?.cancel();
 
+    debugPrint('[BG] Setting up scan results listener...');
     streamSubscription = FlutterBluePlus.scanResults.listen(
       (results) async {
+        debugPrint('[BG] Received ${results.length} scan results');
         for (ScanResult result in results) {
           if (result.device.remoteId.str.isNotEmpty &&
               !scannedDevicesList.contains(result.device)) {
+            debugPrint(
+                '[BG] Found device: ${result.device.platformName} (${result.device.remoteId.str})');
             // Check if this is the device we want to connect to
             bool shouldConnect = false;
             if (config.deviceId != null &&
                 result.device.remoteId.str == config.deviceId) {
+              debugPrint('[BG] Device matches by ID: ${config.deviceId}');
               shouldConnect = true;
             } else if (config.deviceName != null &&
                 result.device.platformName == config.deviceName) {
+              debugPrint('[BG] Device matches by name: ${config.deviceName}');
               shouldConnect = true;
             }
 
             if (shouldConnect) {
+              debugPrint(
+                  '[BG] Attempting to connect to device: ${result.device.platformName}');
               await streamSubscription?.cancel();
               scannedDevicesList.add(result.device);
               connectedDevice = result.device;
 
               await FlutterBluePlus.stopScan();
+              debugPrint('[BG] Scan stopped, attempting device connection...');
 
               try {
                 // Connect to device
+                debugPrint(
+                    '[BG] Connecting to device: ${connectedDevice!.remoteId.str}');
                 await connectedDevice!.connect(autoConnect: false);
 
                 // Discover services
+                debugPrint('[BG] Discovering services...');
                 bleServices = await connectedDevice!.discoverServices();
+                debugPrint('[BG] Found ${bleServices.length} services');
 
                 // Set up MTU for Android
                 if (Platform.isAndroid) {
+                  debugPrint(
+                      '[BG] Setting MTU to ${config.mtuSize} for Android');
                   await connectedDevice!.requestMtu(config.mtuSize);
                 }
 
                 // Set up connection state listener
+                debugPrint('[BG] Setting up connection state listener...');
                 connectionSubscription = connectedDevice?.connectionState
                     .listen((BluetoothConnectionState state) async {
+                  debugPrint('[BG] Connection state changed: $state');
                   if (state == BluetoothConnectionState.disconnected) {
-                    print('[BLE Service] Device disconnected');
+                    debugPrint('[BG] Device disconnected');
                     dataSubscription?.cancel();
                     isDeviceConnected = false;
 
                     // Auto-reconnect if enabled
                     if (config.autoReconnect) {
+                      debugPrint(
+                          '[BG] Auto-reconnect enabled, restarting scan...');
                       _startScanning(
                         config: config,
                         scannedDevicesList: scannedDevicesList,
@@ -357,10 +465,11 @@ class GenericBleService {
                     }
                     connectionSubscription?.cancel();
                   } else if (state == BluetoothConnectionState.connected) {
-                    print('[BLE Service] Device connected');
+                    debugPrint('[BG] Device connected successfully');
                     isDeviceConnected = true;
 
                     // Start data communication
+                    debugPrint('[BG] Starting data communication...');
                     await _startDataCommunication(
                       connectedDevice!,
                       bleServices,

@@ -96,7 +96,7 @@ class _MyHomePageState extends State<MyHomePage> {
           channelName: 'BLE Service',
           channelDescription: 'BLE background service',
           title: 'BLE Service',
-          content: 'Running',
+          // content: 'Running',
           importance: NotificationImportance.low,
           showBadge: false,
           enableVibration: false,
