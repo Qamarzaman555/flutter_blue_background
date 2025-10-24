@@ -83,7 +83,8 @@ class _MyHomePageState extends State<MyHomePage> {
         serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
         sendCharacteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
         receiveCharacteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
-        deviceName: 'Leo USB EVNC106P6',
+        deviceName: 'Leo USB EVNC1O6P6',
+        // deviceId: 'YOUR_DEVICE_ID_HERE', // Uncomment and add your device ID if needed
         autoReconnect: true,
         enableBatteryMonitoring: true,
         enableBatteryHealthCalculation: true,

@@ -20,6 +20,7 @@ class GenericBleService {
 
   static BleConfig? _config;
   static SharedPreferences? _prefs;
+  static Timer? _notificationTimer;
 
   /// Initialize the service with configuration
   static Future<void> initialize({
@@ -296,7 +297,6 @@ class GenericBleService {
 
     // Battery monitoring variables
     debugPrint('[BG] Initializing battery monitoring variables...');
-    Timer? notificationTimer;
     int batteryLevel = 0;
     String batteryState = 'unknown';
     double mah = 0.0;
@@ -327,7 +327,7 @@ class GenericBleService {
     // Start notification updates
     debugPrint(
         '[BG] Starting notification timer with ${notificationConfig.updateIntervalSeconds}s interval');
-    notificationTimer = Timer.periodic(
+    _notificationTimer = Timer.periodic(
       Duration(seconds: notificationConfig.updateIntervalSeconds),
       (timer) async {
         debugPrint('[BG] Notification timer tick - updating notification');
@@ -402,6 +402,10 @@ class GenericBleService {
               !scannedDevicesList.contains(result.device)) {
             debugPrint(
                 '[BG] Found device: ${result.device.platformName} (${result.device.remoteId.str})');
+            debugPrint(
+                '[BG] Looking for device with name: ${config.deviceName}');
+            debugPrint('[BG] Looking for device with ID: ${config.deviceId}');
+
             // Check if this is the device we want to connect to
             bool shouldConnect = false;
             if (config.deviceId != null &&
@@ -412,6 +416,12 @@ class GenericBleService {
                 result.device.platformName == config.deviceName) {
               debugPrint('[BG] Device matches by name: ${config.deviceName}');
               shouldConnect = true;
+            } else {
+              debugPrint('[BG] Device does not match criteria');
+              debugPrint(
+                  '[BG] Device name: "${result.device.platformName}" vs expected: "${config.deviceName}"');
+              debugPrint(
+                  '[BG] Device ID: "${result.device.remoteId.str}" vs expected: "${config.deviceId}"');
             }
 
             if (shouldConnect) {
@@ -428,7 +438,15 @@ class GenericBleService {
                 // Connect to device
                 debugPrint(
                     '[BG] Connecting to device: ${connectedDevice!.remoteId.str}');
-                await connectedDevice!.connect(autoConnect: false);
+                debugPrint(
+                    '[BG] Device name: ${connectedDevice!.platformName}');
+                debugPrint(
+                    '[BG] Connection timeout: ${config.connectionTimeoutSeconds} seconds');
+
+                // Add connection timeout
+                await connectedDevice!.connect(autoConnect: false).timeout(
+                    Duration(seconds: config.connectionTimeoutSeconds));
+                debugPrint('[BG] Device connected successfully!');
 
                 // Discover services
                 debugPrint('[BG] Discovering services...');
@@ -485,8 +503,13 @@ class GenericBleService {
                   }
                 });
               } catch (e) {
-                print('[BLE Service] Connection error: $e');
+                debugPrint('[BG] Connection error: $e');
+                debugPrint('[BG] Error type: ${e.runtimeType}');
+                debugPrint(
+                    '[BG] Device that failed to connect: ${connectedDevice?.platformName} (${connectedDevice?.remoteId.str})');
+
                 if (config.autoReconnect) {
+                  debugPrint('[BG] Auto-reconnect enabled, restarting scan...');
                   _startScanning(
                     config: config,
                     scannedDevicesList: scannedDevicesList,
@@ -498,6 +521,8 @@ class GenericBleService {
                     isDeviceConnected: isDeviceConnected,
                     prefs: prefs,
                   );
+                } else {
+                  debugPrint('[BG] Auto-reconnect disabled, stopping scan');
                 }
               }
             }
