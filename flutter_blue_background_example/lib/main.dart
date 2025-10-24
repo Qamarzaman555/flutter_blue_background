@@ -78,7 +78,7 @@ class _MyHomePageState extends State<MyHomePage> {
       }
 
       // Create configuration
-      const config = BleConfig(
+      final config = BleConfig(
         serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
         sendCharacteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
         receiveCharacteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
@@ -91,7 +91,7 @@ class _MyHomePageState extends State<MyHomePage> {
           channelName: 'BLE Service',
           channelDescription: 'BLE background service',
           title: 'BLE Service',
-          // content: 'Running',
+          content: '${DateTime.now().toIso8601String()}',
           importance: NotificationImportance.low,
           showBadge: false,
           enableVibration: false,
@@ -99,6 +99,8 @@ class _MyHomePageState extends State<MyHomePage> {
           playSound: false,
           notificationId: 1,
           updateIntervalSeconds: 10,
+          showConnectionStatus:
+              false, // Use custom content instead of connection status
         ),
         dataProcessingConfig: DataProcessingConfig(
           enableLogging: true,

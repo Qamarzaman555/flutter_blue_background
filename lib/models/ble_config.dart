@@ -154,6 +154,9 @@ class NotificationConfig {
   /// Update interval in seconds
   final int updateIntervalSeconds;
 
+  /// Show connection status in notification content
+  final bool showConnectionStatus;
+
   const NotificationConfig({
     this.channelId = 'ble_background_service',
     this.channelName = 'BLE Background Service',
@@ -167,6 +170,7 @@ class NotificationConfig {
     this.content = 'Background service is active',
     this.notificationId = 888,
     this.updateIntervalSeconds = 2,
+    this.showConnectionStatus = true,
   });
 
   /// Convert to JSON
@@ -184,6 +188,7 @@ class NotificationConfig {
       'content': content,
       'notificationId': notificationId,
       'updateIntervalSeconds': updateIntervalSeconds,
+      'showConnectionStatus': showConnectionStatus,
     };
   }
 
@@ -206,6 +211,7 @@ class NotificationConfig {
       content: json['content'] as String? ?? 'Background service is active',
       notificationId: json['notificationId'] as int? ?? 888,
       updateIntervalSeconds: json['updateIntervalSeconds'] as int? ?? 2,
+      showConnectionStatus: json['showConnectionStatus'] as bool? ?? true,
     );
   }
 }

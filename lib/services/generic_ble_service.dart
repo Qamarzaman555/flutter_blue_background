@@ -560,7 +560,15 @@ class GenericBleService {
     NotificationConfig config,
     bool isConnected,
   ) async {
-    final content = 'Device: ${isConnected ? "Connected" : "Disconnected"}';
+    // Use connection status or custom content based on configuration
+    String content;
+    if (config.showConnectionStatus) {
+      // Show connection status
+      content = 'Device: ${isConnected ? "Connected" : "Disconnected"}';
+    } else {
+      // Use custom content as-is
+      content = config.content;
+    }
 
     await plugin.show(
       config.notificationId,
