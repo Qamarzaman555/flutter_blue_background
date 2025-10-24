@@ -35,7 +35,6 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   bool _isServiceRunning = false;
   List<BleData> _receivedData = [];
-  List<BatteryData> _batteryData = [];
   ServiceStatusData? _serviceStatus;
 
   @override
@@ -86,12 +85,6 @@ class _MyHomePageState extends State<MyHomePage> {
         deviceName: 'Leo USB EVNC1O6P6',
         // deviceId: 'YOUR_DEVICE_ID_HERE', // Uncomment and add your device ID if needed
         autoReconnect: true,
-        enableBatteryMonitoring: true,
-        enableBatteryHealthCalculation: true,
-        batteryHealthThreshold: 30,
-        batteryCapacity: 3000.0, // mAh
-        chargeLimit: 73,
-        enableCustomChargeLimit: true,
         // Temporarily disable notification to test if service works without it
         notificationConfig: NotificationConfig(
           // channelId: 'ble_service',
@@ -128,9 +121,6 @@ class _MyHomePageState extends State<MyHomePage> {
         },
         onDataSent: (data, characteristicUuid) {
           print('Sent data: $data to $characteristicUuid');
-        },
-        onBatteryEvent: (event) {
-          print('Battery event: $event');
         },
         onServiceEvent: (event) {
           print('Service event: $event');
@@ -189,19 +179,6 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  Future<void> _sendData() async {
-    try {
-      await FlutterBlueBackground.sendData('Hello from Flutter!');
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Data sent')));
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
-
   Future<void> _getReceivedData() async {
     try {
       final data = await FlutterBlueBackground.getReceivedData();
@@ -218,28 +195,11 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  Future<void> _getBatteryData() async {
-    try {
-      final data = await FlutterBlueBackground.getBatteryData();
-      setState(() {
-        _batteryData = data;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Retrieved ${data.length} battery entries')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
-    }
-  }
-
   Future<void> _clearData() async {
     try {
       await FlutterBlueBackground.clearReceivedData();
       setState(() {
         _receivedData.clear();
-        _batteryData.clear();
       });
       ScaffoldMessenger.of(
         context,
@@ -383,12 +343,6 @@ class _MyHomePageState extends State<MyHomePage> {
             const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _getBatteryData,
-                    child: const Text('Get Battery Data'),
-                  ),
-                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
@@ -417,32 +371,6 @@ class _MyHomePageState extends State<MyHomePage> {
                           '${data.characteristicUuid} - ${data.timestamp}',
                         ),
                         trailing: Text('${data.rawData.length} bytes'),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-            if (_batteryData.isNotEmpty) ...[
-              Text(
-                'Battery Data (${_batteryData.length})',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _batteryData.length,
-                  itemBuilder: (context, index) {
-                    final data = _batteryData[index];
-                    return Card(
-                      child: ListTile(
-                        title: Text('${data.level}% - ${data.state}'),
-                        subtitle: Text(
-                          'Health: ${data.health?.toStringAsFixed(1)}% - mAh: ${data.mah?.toStringAsFixed(2)}',
-                        ),
-                        trailing: Text(
-                          data.timestamp.toString().substring(11, 19),
-                        ),
                       ),
                     );
                   },

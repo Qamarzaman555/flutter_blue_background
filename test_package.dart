@@ -63,7 +63,6 @@ class _TestHomePageState extends State<TestHomePage> {
         receiveCharacteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
         deviceName: 'Test Device',
         autoReconnect: true,
-        enableBatteryMonitoring: false, // Disable for testing
       );
 
       // Create simple callbacks

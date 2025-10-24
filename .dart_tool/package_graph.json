@@ -7,7 +7,6 @@
       "name": "flutter_blue_background",
       "version": "0.0.2",
       "dependencies": [
-        "battery_plus",
         "flutter",
         "flutter_background_service",
         "flutter_background_service_android",
@@ -81,17 +80,6 @@
         "permission_handler_html",
         "permission_handler_platform_interface",
         "permission_handler_windows"
-      ]
-    },
-    {
-      "name": "battery_plus",
-      "version": "5.0.3",
-      "dependencies": [
-        "battery_plus_platform_interface",
-        "flutter",
-        "flutter_web_plugins",
-        "meta",
-        "upower"
       ]
     },
     {
@@ -405,34 +393,6 @@
       ]
     },
     {
-      "name": "upower",
-      "version": "0.7.0",
-      "dependencies": [
-        "dbus"
-      ]
-    },
-    {
-      "name": "battery_plus_platform_interface",
-      "version": "2.0.1",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "plugin_platform_interface"
-      ]
-    },
-    {
-      "name": "flutter_web_plugins",
-      "version": "0.0.0",
-      "dependencies": [
-        "characters",
-        "collection",
-        "flutter",
-        "material_color_utilities",
-        "meta",
-        "vector_math"
-      ]
-    },
-    {
       "name": "shared_preferences_windows",
       "version": "2.3.2",
       "dependencies": [
@@ -549,6 +509,18 @@
       "name": "web",
       "version": "1.1.1",
       "dependencies": []
+    },
+    {
+      "name": "flutter_web_plugins",
+      "version": "0.0.0",
+      "dependencies": [
+        "characters",
+        "collection",
+        "flutter",
+        "material_color_utilities",
+        "meta",
+        "vector_math"
+      ]
     },
     {
       "name": "path_provider_windows",

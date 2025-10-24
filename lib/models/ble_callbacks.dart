@@ -15,9 +15,6 @@ typedef DataSentCallback = void Function(
 /// Callback function type for scan results
 typedef ScanResultCallback = void Function(List<BluetoothDevice> devices);
 
-/// Callback function type for battery events
-typedef BatteryEventCallback = void Function(BatteryEvent event);
-
 /// Callback function type for service events
 typedef ServiceEventCallback = void Function(ServiceEvent event);
 
@@ -26,39 +23,6 @@ typedef ErrorCallback = void Function(String error, Exception? exception);
 
 /// Callback function type for data processing
 typedef DataProcessingCallback = String? Function(List<int> rawData);
-
-/// Battery event types
-enum BatteryEventType {
-  levelChanged,
-  stateChanged,
-  healthCalculated,
-  chargeLimitReached,
-  dischargeDetected,
-}
-
-/// Battery event data
-class BatteryEvent {
-  final BatteryEventType type;
-  final int? batteryLevel;
-  final String? batteryState;
-  final double? batteryHealth;
-  final double? mah;
-  final DateTime timestamp;
-
-  const BatteryEvent({
-    required this.type,
-    this.batteryLevel,
-    this.batteryState,
-    this.batteryHealth,
-    this.mah,
-    required this.timestamp,
-  });
-
-  @override
-  String toString() {
-    return 'BatteryEvent(type: $type, level: $batteryLevel, state: $batteryState, health: $batteryHealth, mah: $mah, timestamp: $timestamp)';
-  }
-}
 
 /// Service event types
 enum ServiceEventType {
@@ -104,9 +68,6 @@ class BleCallbacks {
   /// Called when scan results are available
   final ScanResultCallback? onScanResults;
 
-  /// Called when battery events occur
-  final BatteryEventCallback? onBatteryEvent;
-
   /// Called when service events occur
   final ServiceEventCallback? onServiceEvent;
 
@@ -121,7 +82,6 @@ class BleCallbacks {
     this.onDataReceived,
     this.onDataSent,
     this.onScanResults,
-    this.onBatteryEvent,
     this.onServiceEvent,
     this.onError,
     this.onDataProcessing,
@@ -133,7 +93,6 @@ class BleCallbacks {
     DataReceivedCallback? onDataReceived,
     DataSentCallback? onDataSent,
     ScanResultCallback? onScanResults,
-    BatteryEventCallback? onBatteryEvent,
     ServiceEventCallback? onServiceEvent,
     ErrorCallback? onError,
     DataProcessingCallback? onDataProcessing,
@@ -143,7 +102,6 @@ class BleCallbacks {
       onDataReceived: onDataReceived ?? this.onDataReceived,
       onDataSent: onDataSent ?? this.onDataSent,
       onScanResults: onScanResults ?? this.onScanResults,
-      onBatteryEvent: onBatteryEvent ?? this.onBatteryEvent,
       onServiceEvent: onServiceEvent ?? this.onServiceEvent,
       onError: onError ?? this.onError,
       onDataProcessing: onDataProcessing ?? this.onDataProcessing,
@@ -156,7 +114,6 @@ class BleCallbacks {
       onDataReceived != null ||
       onDataSent != null ||
       onScanResults != null ||
-      onBatteryEvent != null ||
       onServiceEvent != null ||
       onError != null ||
       onDataProcessing != null;

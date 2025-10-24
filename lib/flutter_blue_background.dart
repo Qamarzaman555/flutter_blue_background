@@ -216,11 +216,6 @@ class FlutterBlueBackground {
     await GenericBleService.clearReceivedData();
   }
 
-  /// Get battery data
-  static Future<List<BatteryData>> getBatteryData() async {
-    return await GenericBleService.getBatteryData();
-  }
-
   /// Get service status
   static Future<ServiceStatusData> getServiceStatus() async {
     return await GenericBleService.getServiceStatus();

@@ -21,6 +21,7 @@ class GenericBleService {
   static BleConfig? _config;
   static SharedPreferences? _prefs;
   static Timer? _notificationTimer;
+  static bool _isDeviceConnected = false;
 
   /// Initialize the service with configuration
   static Future<void> initialize({
@@ -129,23 +130,6 @@ class GenericBleService {
     } else {
       debugPrint('[BG] WARNING: SharedPreferences not initialized');
     }
-  }
-
-  /// Get battery data
-  static Future<List<BatteryData>> getBatteryData() async {
-    debugPrint('[BG] Retrieving battery data...');
-    if (_prefs == null) {
-      debugPrint(
-          '[BG] WARNING: SharedPreferences not initialized, returning empty list');
-      return [];
-    }
-
-    final dataList = _prefs!.getStringList('battery_data') ?? [];
-    final batteryData = dataList
-        .map((json) => BatteryData.fromJson(json as Map<String, dynamic>))
-        .toList();
-    debugPrint('[BG] Retrieved ${batteryData.length} battery data entries');
-    return batteryData;
   }
 
   /// Get service status
@@ -293,22 +277,8 @@ class GenericBleService {
     StreamSubscription? dataSubscription;
     StreamSubscription? connectionSubscription;
     bool isDeviceConnected = false;
+    _isDeviceConnected = false; // Initialize static variable
     debugPrint('[BG] BLE variables initialized');
-
-    // Battery monitoring variables
-    debugPrint('[BG] Initializing battery monitoring variables...');
-    int batteryLevel = 0;
-    String batteryState = 'unknown';
-    double mah = 0.0;
-    debugPrint('[BG] Battery monitoring variables initialized');
-
-    // Initialize battery monitoring if enabled
-    if (config.enableBatteryMonitoring) {
-      debugPrint('[BG] Battery monitoring enabled, initializing...');
-      await _initializeBatteryMonitoring(config, prefs);
-    } else {
-      debugPrint('[BG] Battery monitoring disabled');
-    }
 
     // Start scanning for devices
     debugPrint('[BG] Starting BLE device scanning...');
@@ -335,10 +305,7 @@ class GenericBleService {
           await _updateNotification(
             flutterLocalNotificationsPlugin,
             notificationConfig,
-            isDeviceConnected,
-            batteryLevel,
-            batteryState,
-            mah,
+            _isDeviceConnected,
           );
         }
       },
@@ -349,17 +316,6 @@ class GenericBleService {
     service.on('stopService').listen((event) {
       service.stopSelf();
     });
-  }
-
-  /// Initialize battery monitoring
-  static Future<void> _initializeBatteryMonitoring(
-    BleConfig config,
-    SharedPreferences prefs,
-  ) async {
-    debugPrint('[BG] Initializing battery monitoring system...');
-    // This would integrate with battery monitoring packages
-    // For now, we'll set up the basic structure
-    debugPrint('[BG] Battery monitoring system initialized');
   }
 
   /// Start scanning for devices
@@ -447,6 +403,8 @@ class GenericBleService {
                 await connectedDevice!.connect(autoConnect: false).timeout(
                     Duration(seconds: config.connectionTimeoutSeconds));
                 debugPrint('[BG] Device connected successfully!');
+                isDeviceConnected = true;
+                _isDeviceConnected = true;
 
                 // Discover services
                 debugPrint('[BG] Discovering services...');
@@ -469,6 +427,7 @@ class GenericBleService {
                     debugPrint('[BG] Device disconnected');
                     dataSubscription?.cancel();
                     isDeviceConnected = false;
+                    _isDeviceConnected = false;
 
                     // Auto-reconnect if enabled
                     if (config.autoReconnect) {
@@ -490,6 +449,7 @@ class GenericBleService {
                   } else if (state == BluetoothConnectionState.connected) {
                     debugPrint('[BG] Device connected successfully');
                     isDeviceConnected = true;
+                    _isDeviceConnected = true;
 
                     // Start data communication
                     debugPrint('[BG] Starting data communication...');
@@ -599,13 +559,8 @@ class GenericBleService {
     FlutterLocalNotificationsPlugin plugin,
     NotificationConfig config,
     bool isConnected,
-    int batteryLevel,
-    String batteryState,
-    double mah,
   ) async {
-    final content = 'Device: ${isConnected ? "Connected" : "Disconnected"} | '
-        'Battery: $batteryLevel% ($batteryState) | '
-        'mAh: ${mah.toStringAsFixed(2)}';
+    final content = 'Device: ${isConnected ? "Connected" : "Disconnected"}';
 
     await plugin.show(
       config.notificationId,

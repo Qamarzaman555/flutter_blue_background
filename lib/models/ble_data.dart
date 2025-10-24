@@ -81,54 +81,6 @@ class BleData {
   }
 }
 
-/// Battery data model
-class BatteryData {
-  final int level;
-  final String state;
-  final double? health;
-  final double? mah;
-  final DateTime timestamp;
-  final String? deviceId;
-
-  const BatteryData({
-    required this.level,
-    required this.state,
-    this.health,
-    this.mah,
-    required this.timestamp,
-    this.deviceId,
-  });
-
-  /// Convert to JSON
-  Map<String, dynamic> toJson() {
-    return {
-      'level': level,
-      'state': state,
-      'health': health,
-      'mah': mah,
-      'timestamp': timestamp.toIso8601String(),
-      'deviceId': deviceId,
-    };
-  }
-
-  /// Create from JSON
-  factory BatteryData.fromJson(Map<String, dynamic> json) {
-    return BatteryData(
-      level: json['level'] as int,
-      state: json['state'] as String,
-      health: json['health'] as double?,
-      mah: json['mah'] as double?,
-      timestamp: DateTime.parse(json['timestamp'] as String),
-      deviceId: json['deviceId'] as String?,
-    );
-  }
-
-  @override
-  String toString() {
-    return 'BatteryData(level: $level%, state: $state, health: $health%, mah: $mah, timestamp: $timestamp)';
-  }
-}
-
 /// Device connection data
 class DeviceConnectionData {
   final String deviceId;

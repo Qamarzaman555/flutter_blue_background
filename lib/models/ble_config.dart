@@ -27,24 +27,6 @@ class BleConfig {
   /// MTU size for Android
   final int mtuSize;
 
-  /// Enable battery monitoring
-  final bool enableBatteryMonitoring;
-
-  /// Enable battery health calculation
-  final bool enableBatteryHealthCalculation;
-
-  /// Battery health calculation threshold (percentage increase)
-  final int batteryHealthThreshold;
-
-  /// Battery capacity in mAh (for health calculation)
-  final double? batteryCapacity;
-
-  /// Charge limit percentage
-  final int chargeLimit;
-
-  /// Enable custom charge limit
-  final bool enableCustomChargeLimit;
-
   /// Notification configuration
   final NotificationConfig notificationConfig;
 
@@ -61,12 +43,6 @@ class BleConfig {
     this.scanTimeoutSeconds = 10,
     this.connectionTimeoutSeconds = 30,
     this.mtuSize = 512,
-    this.enableBatteryMonitoring = true,
-    this.enableBatteryHealthCalculation = false,
-    this.batteryHealthThreshold = 30,
-    this.batteryCapacity,
-    this.chargeLimit = 98,
-    this.enableCustomChargeLimit = false,
     this.notificationConfig = const NotificationConfig(),
     this.dataProcessingConfig = const DataProcessingConfig(),
   });
@@ -82,12 +58,6 @@ class BleConfig {
     int? scanTimeoutSeconds,
     int? connectionTimeoutSeconds,
     int? mtuSize,
-    bool? enableBatteryMonitoring,
-    bool? enableBatteryHealthCalculation,
-    int? batteryHealthThreshold,
-    double? batteryCapacity,
-    int? chargeLimit,
-    bool? enableCustomChargeLimit,
     NotificationConfig? notificationConfig,
     DataProcessingConfig? dataProcessingConfig,
   }) {
@@ -104,16 +74,6 @@ class BleConfig {
       connectionTimeoutSeconds:
           connectionTimeoutSeconds ?? this.connectionTimeoutSeconds,
       mtuSize: mtuSize ?? this.mtuSize,
-      enableBatteryMonitoring:
-          enableBatteryMonitoring ?? this.enableBatteryMonitoring,
-      enableBatteryHealthCalculation:
-          enableBatteryHealthCalculation ?? this.enableBatteryHealthCalculation,
-      batteryHealthThreshold:
-          batteryHealthThreshold ?? this.batteryHealthThreshold,
-      batteryCapacity: batteryCapacity ?? this.batteryCapacity,
-      chargeLimit: chargeLimit ?? this.chargeLimit,
-      enableCustomChargeLimit:
-          enableCustomChargeLimit ?? this.enableCustomChargeLimit,
       notificationConfig: notificationConfig ?? this.notificationConfig,
       dataProcessingConfig: dataProcessingConfig ?? this.dataProcessingConfig,
     );
@@ -131,12 +91,6 @@ class BleConfig {
       'scanTimeoutSeconds': scanTimeoutSeconds,
       'connectionTimeoutSeconds': connectionTimeoutSeconds,
       'mtuSize': mtuSize,
-      'enableBatteryMonitoring': enableBatteryMonitoring,
-      'enableBatteryHealthCalculation': enableBatteryHealthCalculation,
-      'batteryHealthThreshold': batteryHealthThreshold,
-      'batteryCapacity': batteryCapacity,
-      'chargeLimit': chargeLimit,
-      'enableCustomChargeLimit': enableCustomChargeLimit,
       'notificationConfig': notificationConfig.toJson(),
       'dataProcessingConfig': dataProcessingConfig.toJson(),
     };
@@ -154,14 +108,6 @@ class BleConfig {
       scanTimeoutSeconds: json['scanTimeoutSeconds'] as int? ?? 10,
       connectionTimeoutSeconds: json['connectionTimeoutSeconds'] as int? ?? 30,
       mtuSize: json['mtuSize'] as int? ?? 512,
-      enableBatteryMonitoring: json['enableBatteryMonitoring'] as bool? ?? true,
-      enableBatteryHealthCalculation:
-          json['enableBatteryHealthCalculation'] as bool? ?? false,
-      batteryHealthThreshold: json['batteryHealthThreshold'] as int? ?? 30,
-      batteryCapacity: json['batteryCapacity'] as double?,
-      chargeLimit: json['chargeLimit'] as int? ?? 98,
-      enableCustomChargeLimit:
-          json['enableCustomChargeLimit'] as bool? ?? false,
       notificationConfig: NotificationConfig.fromJson(
           json['notificationConfig'] as Map<String, dynamic>? ?? {}),
       dataProcessingConfig: DataProcessingConfig.fromJson(
