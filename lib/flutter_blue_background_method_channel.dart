@@ -16,4 +16,28 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
     );
     return version;
   }
+
+  @override
+  Future<bool> startService({
+    String? notificationTitle,
+    String? notificationContent,
+  }) async {
+    final started = await methodChannel.invokeMethod<bool>('startService', {
+      'notificationTitle': notificationTitle,
+      'notificationContent': notificationContent,
+    });
+    return started ?? false;
+  }
+
+  @override
+  Future<bool> stopService() async {
+    final stopped = await methodChannel.invokeMethod<bool>('stopService');
+    return stopped ?? false;
+  }
+
+  @override
+  Future<bool> isServiceRunning() async {
+    final running = await methodChannel.invokeMethod<bool>('isServiceRunning');
+    return running ?? false;
+  }
 }

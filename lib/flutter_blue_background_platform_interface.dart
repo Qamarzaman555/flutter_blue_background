@@ -26,4 +26,25 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
   }
+
+  /// Starts the native background (foreground) service.
+  ///
+  /// Optionally customizes the persistent notification shown while the service
+  /// is running.
+  Future<bool> startService({
+    String? notificationTitle,
+    String? notificationContent,
+  }) {
+    throw UnimplementedError('startService() has not been implemented.');
+  }
+
+  /// Stops the native background service.
+  Future<bool> stopService() {
+    throw UnimplementedError('stopService() has not been implemented.');
+  }
+
+  /// Whether the native background service is currently running.
+  Future<bool> isServiceRunning() {
+    throw UnimplementedError('isServiceRunning() has not been implemented.');
+  }
 }

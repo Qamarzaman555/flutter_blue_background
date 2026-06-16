@@ -5,7 +5,7 @@ description: "Demonstrates how to use the flutter_blue_background plugin."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 environment:
-  sdk: ^3.12.2
+  sdk: '>=3.3.0 <4.0.0'
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -28,6 +28,10 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+
+  # Used by the demo to request the runtime permissions (notifications and
+  # nearby devices) required by the background service.
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   integration_test:
