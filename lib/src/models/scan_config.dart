@@ -158,6 +158,7 @@ class ScanConfig {
   const ScanConfig({
     this.serviceUuids = const [],
     this.nameFilter,
+    this.skipUnnamedDevices = false,
     this.rssiThreshold,
     this.reportDelay,
     this.android = const AndroidScanSettings(),
@@ -173,6 +174,11 @@ class ScanConfig {
   /// identical (Android can also filter by exact name natively, but a
   /// substring match is more useful and consistent here).
   final String? nameFilter;
+
+  /// When true, devices without an advertised name (null or empty) are dropped
+  /// before being delivered on the results stream. Applied client-side on both
+  /// platforms.
+  final bool skipUnnamedDevices;
 
   /// Drop results with an RSSI weaker than this threshold (in dBm). Applied
   /// client-side on both platforms. Example: `-80`.
@@ -191,6 +197,7 @@ class ScanConfig {
   Map<String, dynamic> toMap() => {
         'serviceUuids': serviceUuids,
         'nameFilter': nameFilter,
+        'skipUnnamedDevices': skipUnnamedDevices,
         'rssiThreshold': rssiThreshold,
         'reportDelayMillis': reportDelay?.inMilliseconds,
         'android': android.toMap(),

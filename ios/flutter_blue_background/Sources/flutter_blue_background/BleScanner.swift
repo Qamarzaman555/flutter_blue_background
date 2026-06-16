@@ -26,6 +26,7 @@ class BleScanner: NSObject {
 
     // Client-side filters.
     private var nameFilter: String?
+    private var skipUnnamedDevices = false
     private var rssiThreshold: Int?
 
     override init() {
@@ -44,6 +45,7 @@ class BleScanner: NSObject {
             : serviceUuidStrings.compactMap { CBUUID(string: $0) }
 
         nameFilter = (config["nameFilter"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        skipUnnamedDevices = (config["skipUnnamedDevices"] as? Bool) ?? false
         rssiThreshold = config["rssiThreshold"] as? Int
 
         var options: [String: Any] = [:]
@@ -81,6 +83,7 @@ class BleScanner: NSObject {
         }
         isScanning = false
         nameFilter = nil
+        skipUnnamedDevices = false
         rssiThreshold = nil
         return true
     }
@@ -130,6 +133,11 @@ extension BleScanner: CBCentralManagerDelegate {
 
         let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
         let name = localName ?? peripheral.name
+
+        // Drop unnamed devices when requested.
+        if skipUnnamedDevices, (name?.isEmpty ?? true) {
+            return
+        }
 
         // Client-side name filter (substring, case-insensitive) for parity with Android.
         if let filter = nameFilter {

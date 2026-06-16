@@ -46,6 +46,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
 
     // Client-side filters captured from the active config.
     private var nameFilter: String? = null
+    private var skipUnnamedDevices: Boolean = false
     private var rssiThreshold: Int? = null
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -81,6 +82,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
         }
 
         nameFilter = (config["nameFilter"] as? String)?.takeIf { it.isNotEmpty() }
+        skipUnnamedDevices = config["skipUnnamedDevices"] as? Boolean ?: false
         rssiThreshold = (config["rssiThreshold"] as? Number)?.toInt()
 
         val filters = buildFilters(config)
@@ -127,6 +129,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
         val callback = activeCallback
         isScanning = false
         nameFilter = null
+        skipUnnamedDevices = false
         rssiThreshold = null
         if (leScanner == null || callback == null) return true
         return try {
@@ -149,6 +152,12 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
 
         // Client-side name filter (substring, case-insensitive) for parity with iOS.
         val name = record?.deviceName ?: runCatching { result.device.name }.getOrNull()
+
+        // Drop unnamed devices when requested.
+        if (skipUnnamedDevices && name.isNullOrEmpty()) {
+            return
+        }
+
         nameFilter?.let { filter ->
             if (name == null || !name.contains(filter, ignoreCase = true)) {
                 return

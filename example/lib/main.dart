@@ -97,7 +97,8 @@ class BleController extends GetxController {
     // signals. Add serviceUuids for reliable background discovery on iOS.
     const config = ScanConfig(
       serviceUuids: [],
-      rssiThreshold: -90,
+      skipUnnamedDevices: true,
+      rssiThreshold: -180,
       android: AndroidScanSettings(scanMode: AndroidScanMode.lowLatency),
       ios: IosScanOptions(allowDuplicates: true),
     );
