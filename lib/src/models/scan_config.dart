@@ -161,6 +161,7 @@ class ScanConfig {
     this.skipUnnamedDevices = false,
     this.rssiThreshold,
     this.reportDelay,
+    this.timeout,
     this.android = const AndroidScanSettings(),
     this.ios = const IosScanOptions(),
   });
@@ -175,9 +176,13 @@ class ScanConfig {
   /// substring match is more useful and consistent here).
   final String? nameFilter;
 
-  /// When true, devices without an advertised name (null or empty) are dropped
-  /// before being delivered on the results stream. Applied client-side on both
-  /// platforms.
+  /// When true, devices without an advertised local name in the BLE
+  /// advertisement packet are dropped before being delivered on the results
+  /// stream. Applied client-side on both platforms.
+  ///
+  /// This matches `flutter_blue_plus` `advName` semantics: bonded/cached
+  /// platform names (e.g. Android `"Unknown"`) do **not** count as an advertised
+  /// name. Only the local name in the scan response/advertisement does.
   final bool skipUnnamedDevices;
 
   /// Drop results with an RSSI weaker than this threshold (in dBm). Applied
@@ -187,6 +192,11 @@ class ScanConfig {
   /// Android batch/report delay. When set (> 0), Android batches results and
   /// reports them on this interval. Ignored on iOS.
   final Duration? reportDelay;
+
+  /// Optional scan duration. When null, the scan runs until [stopScan] is
+  /// called. When set, the scan automatically stops after this duration and
+  /// `isScanning` becomes false. Applies on both platforms.
+  final Duration? timeout;
 
   /// Android-only scan tuning.
   final AndroidScanSettings android;
@@ -200,6 +210,7 @@ class ScanConfig {
         'skipUnnamedDevices': skipUnnamedDevices,
         'rssiThreshold': rssiThreshold,
         'reportDelayMillis': reportDelay?.inMilliseconds,
+        'timeoutMillis': timeout?.inMilliseconds,
         'android': android.toMap(),
         'ios': ios.toMap(),
       };

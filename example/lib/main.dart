@@ -31,13 +31,19 @@ class BleController extends GetxController {
     return list;
   }
 
+  /// Matches [ScanConfig.skipUnnamedDevices] in [startScan].
+  static const _skipUnnamedDevices = true;
+
   @override
   void onInit() {
     super.onInit();
     _restoreState();
-    _scanSub = _plugin.scanResults.listen((result) {
-      devices[result.deviceId] = result;
-    });
+    _scanSub = _plugin.scanResults.listen(_addResult);
+  }
+
+  void _addResult(BleScanResult result) {
+    if (_skipUnnamedDevices && !result.hasAdvertisedName) return;
+    devices[result.deviceId] = result;
   }
 
   @override
@@ -56,7 +62,7 @@ class BleController extends GetxController {
 
     final cached = await _plugin.getScanResults();
     for (final result in cached) {
-      devices[result.deviceId] = result;
+      _addResult(result);
     }
 
     if (isScanning.value) {
@@ -118,10 +124,11 @@ class BleController extends GetxController {
     // signals. Add serviceUuids for reliable background discovery on iOS.
     const config = ScanConfig(
       serviceUuids: [],
-      skipUnnamedDevices: true,
+      skipUnnamedDevices: _skipUnnamedDevices,
       rssiThreshold: -180,
       android: AndroidScanSettings(scanMode: AndroidScanMode.lowLatency),
       ios: IosScanOptions(allowDuplicates: true),
+      timeout: Duration(seconds: 10),
     );
 
     final started = await _plugin.startScan(config);
@@ -243,7 +250,7 @@ class HomePage extends StatelessWidget {
                     final d = devices[index];
                     return ListTile(
                       dense: true,
-                      title: Text(d.name ?? '(unknown)'),
+                      title: Text(d.displayName),
                       subtitle: Text(d.deviceId),
                       trailing: Text('${d.rssi ?? '--'} dBm'),
                     );

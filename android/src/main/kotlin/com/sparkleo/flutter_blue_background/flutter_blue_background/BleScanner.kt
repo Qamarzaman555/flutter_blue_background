@@ -140,16 +140,22 @@ class BleScanner(private val context: Context) {
     private fun handleResult(result: ScanResult) {
         val record = result.scanRecord
 
-        // Client-side name filter (substring, case-insensitive) for parity with iOS.
-        val name = record?.deviceName ?: runCatching { result.device.name }.getOrNull()
+        // Advertisement local name only — matches flutter_blue_plus advName.
+        val advName = BleNameUtils.normalizeAdvertisedName(record?.deviceName)
+        // Platform/cached name — matches flutter_blue_plus platformName.
+        val platformName = BleNameUtils.normalizePlatformName(
+            runCatching { result.device.name }.getOrNull(),
+        )
 
-        // Drop unnamed devices when requested.
-        if (skipUnnamedDevices && name.isNullOrEmpty()) {
+        // skipUnnamedDevices filters on advertisement name only, not bonded/cached
+        // names that Android/iOS may return as "Unknown".
+        if (skipUnnamedDevices && advName == null) {
             return
         }
 
+        val nameForFilter = advName ?: platformName
         nameFilter?.let { filter ->
-            if (name == null || !name.contains(filter, ignoreCase = true)) {
+            if (nameForFilter == null || !nameForFilter.contains(filter, ignoreCase = true)) {
                 return
             }
         }
@@ -171,7 +177,9 @@ class BleScanner(private val context: Context) {
 
         val payload: Map<String, Any?> = mapOf(
             "deviceId" to result.device.address,
-            "name" to name,
+            "advName" to (advName ?: ""),
+            "platformName" to (platformName ?: ""),
+            "name" to (advName ?: platformName),
             "rssi" to result.rssi,
             "txPowerLevel" to record?.txPowerLevel,
             "connectable" to connectable,

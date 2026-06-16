@@ -75,6 +75,7 @@ class FlutterBlueBackgroundService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
     private var keepAliveRunnable: Runnable? = null
+    private var scanTimeoutRunnable: Runnable? = null
 
     private var notificationTitle: String = DEFAULT_NOTIFICATION_TITLE
     private var notificationContent: String = DEFAULT_NOTIFICATION_CONTENT
@@ -128,6 +129,7 @@ class FlutterBlueBackgroundService : Service() {
     private fun handleScanCommand(intent: Intent?, prefs: android.content.SharedPreferences) {
         when (intent?.action) {
             ACTION_STOP_SCAN -> {
+                cancelScanTimeout()
                 bleScanner.stopScan()
                 prefs.edit()
                     .putBoolean(KEY_SCAN_ENABLED, false)
@@ -142,7 +144,9 @@ class FlutterBlueBackgroundService : Service() {
                         .putBoolean(KEY_SCAN_ENABLED, true)
                         .putString(KEY_SCAN_CONFIG, json)
                         .apply()
-                    bleScanner.startScan(ScanConfigCodec.decode(json))
+                    val config = ScanConfigCodec.decode(json)
+                    bleScanner.startScan(config)
+                    scheduleScanTimeout(config)
                 }
             }
 
@@ -152,11 +156,43 @@ class FlutterBlueBackgroundService : Service() {
                 if (prefs.getBoolean(KEY_SCAN_ENABLED, false) && !bleScanner.isScanning) {
                     val json = prefs.getString(KEY_SCAN_CONFIG, null)
                     if (json != null) {
-                        bleScanner.startScan(ScanConfigCodec.decode(json))
+                        val config = ScanConfigCodec.decode(json)
+                        bleScanner.startScan(config)
+                        scheduleScanTimeout(config)
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Schedules an automatic scan stop after `timeoutMillis` if the config
+     * specifies one. A null/zero timeout means "scan until stopped".
+     */
+    private fun scheduleScanTimeout(config: Map<String, Any?>) {
+        cancelScanTimeout()
+        val timeoutMillis = (config["timeoutMillis"] as? Number)?.toLong() ?: return
+        if (timeoutMillis <= 0L) return
+
+        val runnable = Runnable {
+            Log.d(TAG, "Scan timeout reached; stopping scan")
+            bleScanner.stopScan()
+            // Clear the persisted scan so a later service restart does not resume
+            // a scan whose timed window already elapsed.
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_SCAN_ENABLED, false)
+                .remove(KEY_SCAN_CONFIG)
+                .apply()
+            scanTimeoutRunnable = null
+        }
+        scanTimeoutRunnable = runnable
+        handler.postDelayed(runnable, timeoutMillis)
+    }
+
+    private fun cancelScanTimeout() {
+        scanTimeoutRunnable?.let { handler.removeCallbacks(it) }
+        scanTimeoutRunnable = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -172,6 +208,7 @@ class FlutterBlueBackgroundService : Service() {
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed (stopRequested=$isStopRequested)")
         stopKeepAlive()
+        cancelScanTimeout()
         releaseWakeLock()
 
         // Always release the BluetoothLeScanner callback so we do not leak scan

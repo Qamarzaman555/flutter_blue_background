@@ -35,6 +35,8 @@ class BleScanner: NSObject {
     private var pendingServiceUuids: [CBUUID]?
     private var pendingOptions: [String: Any]?
     private var hasPendingScan = false
+    private var pendingTimeoutMillis: Int?
+    private var timeoutTimer: Timer?
 
     // Client-side filters.
     private var nameFilter: String?
@@ -48,6 +50,17 @@ class BleScanner: NSObject {
         centralManager = CBCentralManager(delegate: self, queue: nil)
     }
 
+    deinit {
+        // Final safety net: ensure no timer, scan, or delegate callback can
+        // outlive this instance.
+        cancelTimeoutTimer()
+        if centralManager?.isScanning == true {
+            centralManager.stopScan()
+        }
+        centralManager?.delegate = nil
+        eventSink = nil
+    }
+
     // MARK: - Public API
 
     func startScan(_ config: [String: Any]) -> Bool {
@@ -59,6 +72,7 @@ class BleScanner: NSObject {
         nameFilter = (config["nameFilter"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         skipUnnamedDevices = (config["skipUnnamedDevices"] as? Bool) ?? false
         rssiThreshold = config["rssiThreshold"] as? Int
+        pendingTimeoutMillis = config["timeoutMillis"] as? Int
 
         clearCache()
 
@@ -92,6 +106,7 @@ class BleScanner: NSObject {
 
     func stopScan() -> Bool {
         hasPendingScan = false
+        cancelTimeoutTimer()
         if centralManager.isScanning {
             centralManager.stopScan()
         }
@@ -99,6 +114,7 @@ class BleScanner: NSObject {
         nameFilter = nil
         skipUnnamedDevices = false
         rssiThreshold = nil
+        pendingTimeoutMillis = nil
         return true
     }
 
@@ -144,7 +160,34 @@ class BleScanner: NSObject {
         )
         isScanning = true
         hasPendingScan = false
+        scheduleTimeoutTimer()
         os_log("Scan started", log: log, type: .info)
+    }
+
+    private func scheduleTimeoutTimer() {
+        cancelTimeoutTimer()
+        guard let millis = pendingTimeoutMillis, millis > 0 else { return }
+        let interval = TimeInterval(millis) / 1000.0
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] firedTimer in
+            // Dispose the one-shot timer immediately so it never lingers,
+            // regardless of what stopScan() does next.
+            firedTimer.invalidate()
+            guard let self = self else { return }
+            if self.timeoutTimer === firedTimer {
+                self.timeoutTimer = nil
+            }
+            os_log("Scan timeout reached; stopping scan", log: self.log, type: .info)
+            _ = self.stopScan()
+        }
+        // Add explicitly to the main run loop so it fires even if created off the
+        // main thread.
+        RunLoop.main.add(timer, forMode: .common)
+        timeoutTimer = timer
+    }
+
+    private func cancelTimeoutTimer() {
+        timeoutTimer?.invalidate()
+        timeoutTimer = nil
     }
 }
 
@@ -174,16 +217,18 @@ extension BleScanner: CBCentralManagerDelegate {
         }
 
         let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        let name = localName ?? peripheral.name
+        let advName = BleNameUtils.normalizeAdvertisedName(localName)
+        let platformName = BleNameUtils.normalizePlatformName(peripheral.name)
 
-        // Drop unnamed devices when requested.
-        if skipUnnamedDevices, (name?.isEmpty ?? true) {
+        // skipUnnamedDevices filters on advertisement local name only — not a
+        // cached peripheral.name that iOS may retain from a prior connection.
+        if skipUnnamedDevices, advName == nil {
             return
         }
 
-        // Client-side name filter (substring, case-insensitive) for parity with Android.
+        let nameForFilter = advName ?? platformName
         if let filter = nameFilter {
-            guard let name = name,
+            guard let name = nameForFilter,
                   name.range(of: filter, options: .caseInsensitive) != nil else {
                 return
             }
@@ -191,12 +236,14 @@ extension BleScanner: CBCentralManagerDelegate {
 
         var payload: [String: Any] = [
             "deviceId": peripheral.identifier.uuidString,
+            "advName": advName ?? "",
+            "platformName": platformName ?? "",
             "rssi": rssi,
             "timestampMillis": Int(Date().timeIntervalSince1970 * 1000),
         ]
 
-        if let name = name {
-            payload["name"] = name
+        if let displayName = advName ?? platformName {
+            payload["name"] = displayName
         }
 
         if let txPower = advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber {
