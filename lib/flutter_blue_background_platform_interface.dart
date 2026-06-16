@@ -1,6 +1,8 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_blue_background_method_channel.dart';
+import 'src/models/ble_scan_result.dart';
+import 'src/models/scan_config.dart';
 
 abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   /// Constructs a FlutterBlueBackgroundPlatform.
@@ -46,5 +48,25 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   /// Whether the native background service is currently running.
   Future<bool> isServiceRunning() {
     throw UnimplementedError('isServiceRunning() has not been implemented.');
+  }
+
+  /// Starts a BLE scan using [config].
+  Future<bool> startScan(ScanConfig config) {
+    throw UnimplementedError('startScan() has not been implemented.');
+  }
+
+  /// Stops an in-progress BLE scan.
+  Future<bool> stopScan() {
+    throw UnimplementedError('stopScan() has not been implemented.');
+  }
+
+  /// Whether a BLE scan is currently running.
+  Future<bool> isScanning() {
+    throw UnimplementedError('isScanning() has not been implemented.');
+  }
+
+  /// A broadcast stream of BLE devices discovered during a scan.
+  Stream<BleScanResult> get scanResults {
+    throw UnimplementedError('scanResults has not been implemented.');
   }
 }

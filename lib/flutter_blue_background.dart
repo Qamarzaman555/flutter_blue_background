@@ -1,5 +1,10 @@
 
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/models/ble_scan_result.dart';
+import 'src/models/scan_config.dart';
+
+export 'src/models/ble_scan_result.dart';
+export 'src/models/scan_config.dart';
 
 class FlutterBlueBackground {
   Future<String?> getPlatformVersion() {
@@ -31,4 +36,26 @@ class FlutterBlueBackground {
   Future<bool> isServiceRunning() {
     return FlutterBlueBackgroundPlatform.instance.isServiceRunning();
   }
+
+  /// Starts a BLE scan using [config].
+  ///
+  /// Discovered devices are delivered on [scanResults]. Calling this while a
+  /// scan is already running restarts the scan with the new [config].
+  Future<bool> startScan([ScanConfig config = const ScanConfig()]) {
+    return FlutterBlueBackgroundPlatform.instance.startScan(config);
+  }
+
+  /// Stops an in-progress BLE scan.
+  Future<bool> stopScan() {
+    return FlutterBlueBackgroundPlatform.instance.stopScan();
+  }
+
+  /// Whether a BLE scan is currently running.
+  Future<bool> isScanning() {
+    return FlutterBlueBackgroundPlatform.instance.isScanning();
+  }
+
+  /// A broadcast stream of BLE devices discovered during a scan.
+  Stream<BleScanResult> get scanResults =>
+      FlutterBlueBackgroundPlatform.instance.scanResults;
 }

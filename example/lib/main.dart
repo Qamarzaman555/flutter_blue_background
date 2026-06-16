@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
 import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -7,106 +10,226 @@ void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+/// Holds all BLE service + scan state reactively so the UI can rebuild with
+/// [Obx] instead of [State.setState].
+class BleController extends GetxController {
+  final _plugin = FlutterBlueBackground();
+
+  final isRunning = false.obs;
+  final isScanning = false.obs;
+  final status = 'Idle'.obs;
+
+  /// Keyed by deviceId so repeated advertisements update in place.
+  final RxMap<String, BleScanResult> devices = <String, BleScanResult>{}.obs;
+
+  StreamSubscription<BleScanResult>? _scanSub;
+
+  /// Devices sorted by signal strength (strongest first).
+  List<BleScanResult> get sortedDevices {
+    final list = devices.values.toList();
+    list.sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999));
+    return list;
+  }
 
   @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  final _flutterBlueBackgroundPlugin = FlutterBlueBackground();
-
-  bool _isRunning = false;
-  String _status = 'Idle';
-
-  @override
-  void initState() {
-    super.initState();
+  void onInit() {
+    super.onInit();
     _refreshRunningState();
+    _scanSub = _plugin.scanResults.listen((result) {
+      devices[result.deviceId] = result;
+    });
+  }
+
+  @override
+  void onClose() {
+    _scanSub?.cancel();
+    super.onClose();
   }
 
   Future<void> _refreshRunningState() async {
-    final running = await _flutterBlueBackgroundPlugin.isServiceRunning();
-    if (!mounted) return;
-    setState(() => _isRunning = running);
+    isRunning.value = await _plugin.isServiceRunning();
   }
 
   Future<bool> _ensurePermissions() async {
-    // The connectedDevice foreground service type needs a nearby-devices
-    // permission granted at runtime, and Android 13+ needs notification
-    // permission for the foreground notification to be visible.
     final statuses = await [
+      Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.notification,
     ].request();
 
-    return statuses[Permission.bluetoothConnect]?.isGranted ?? false;
+    // bluetoothScan covers Android 12+; older versions fall back to location.
+    final scanOk = statuses[Permission.bluetoothScan]?.isGranted ?? false;
+    final connectOk = statuses[Permission.bluetoothConnect]?.isGranted ?? false;
+    return scanOk || connectOk;
   }
 
-  Future<void> _start() async {
-    setState(() => _status = 'Requesting permissions...');
-    final granted = await _ensurePermissions();
-    if (!granted) {
-      setState(() => _status = 'Nearby devices permission denied');
+  Future<void> startService() async {
+    status.value = 'Requesting permissions...';
+    if (!await _ensurePermissions()) {
+      status.value = 'Bluetooth permission denied';
       return;
     }
 
-    final started = await _flutterBlueBackgroundPlugin.startService(
+    final started = await _plugin.startService(
       notificationTitle: 'Flutter Blue Background',
       notificationContent: 'Service is running',
     );
-    if (!mounted) return;
-    setState(() {
-      _status = started ? 'Service started' : 'Failed to start';
-    });
+    status.value = started ? 'Service started' : 'Failed to start';
     await _refreshRunningState();
   }
 
-  Future<void> _stop() async {
-    final stopped = await _flutterBlueBackgroundPlugin.stopService();
-    if (!mounted) return;
-    setState(() {
-      _status = stopped ? 'Service stopped' : 'Failed to stop';
-    });
+  Future<void> stopService() async {
+    final stopped = await _plugin.stopService();
+    status.value = stopped ? 'Service stopped' : 'Failed to stop';
     await _refreshRunningState();
   }
+
+  Future<void> startScan() async {
+    if (!await _ensurePermissions()) {
+      status.value = 'Bluetooth permission denied';
+      return;
+    }
+
+    devices.clear();
+
+    // Example config: no service filter (finds everything in the foreground),
+    // low-latency scanning on Android, and a -90 dBm floor to drop very weak
+    // signals. Add serviceUuids for reliable background discovery on iOS.
+    const config = ScanConfig(
+      serviceUuids: [],
+      rssiThreshold: -90,
+      android: AndroidScanSettings(scanMode: AndroidScanMode.lowLatency),
+      ios: IosScanOptions(allowDuplicates: true),
+    );
+
+    final started = await _plugin.startScan(config);
+    isScanning.value = started;
+    status.value = started ? 'Scanning...' : 'Failed to start scan';
+  }
+
+  Future<void> stopScan() async {
+    await _plugin.stopScan();
+    isScanning.value = false;
+    status.value = 'Scan stopped';
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Background service example')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _isRunning ? 'Service: RUNNING' : 'Service: STOPPED',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Text(_status),
-                const SizedBox(height: 32),
-                FilledButton(
-                  onPressed: _isRunning ? null : _start,
-                  child: const Text('Start service'),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: _isRunning ? _stop : null,
-                  child: const Text('Stop service'),
-                ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: _refreshRunningState,
-                  child: const Text('Refresh status'),
-                ),
-              ],
+    return GetMaterialApp(
+      title: 'Background service example',
+      home: const HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.put(BleController());
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Background service example')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Obx(
+              () => Text(
+                controller.isRunning.value
+                    ? 'Service: RUNNING'
+                    : 'Service: STOPPED',
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
             ),
-          ),
+            const SizedBox(height: 4),
+            Obx(
+              () => Text(controller.status.value, textAlign: TextAlign.center),
+            ),
+            const SizedBox(height: 16),
+            Obx(
+              () => Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: controller.isRunning.value
+                          ? null
+                          : controller.startService,
+                      child: const Text('Start service'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: controller.isRunning.value
+                          ? controller.stopService
+                          : null,
+                      child: const Text('Stop service'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Obx(
+              () => Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.tonal(
+                      onPressed: controller.isScanning.value
+                          ? null
+                          : controller.startScan,
+                      child: const Text('Start scan'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: controller.isScanning.value
+                          ? controller.stopScan
+                          : null,
+                      child: const Text('Stop scan'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Obx(
+              () => Text(
+                'Discovered devices (${controller.devices.length})',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            const Divider(),
+            Expanded(
+              child: Obx(() {
+                final devices = controller.sortedDevices;
+                if (devices.isEmpty) {
+                  return const Center(child: Text('No devices yet'));
+                }
+                return ListView.builder(
+                  itemCount: devices.length,
+                  itemBuilder: (context, index) {
+                    final d = devices[index];
+                    return ListTile(
+                      dense: true,
+                      title: Text(d.name ?? '(unknown)'),
+                      subtitle: Text(d.deviceId),
+                      trailing: Text('${d.rssi ?? '--'} dBm'),
+                    );
+                  },
+                );
+              }),
+            ),
+          ],
         ),
       ),
     );

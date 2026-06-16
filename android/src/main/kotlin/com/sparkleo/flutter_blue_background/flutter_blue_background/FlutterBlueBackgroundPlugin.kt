@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -18,12 +19,22 @@ class FlutterBlueBackgroundPlugin :
     // This local reference serves to register the plugin with the Flutter Engine and unregister it
     // when the Flutter Engine is detached from the Activity
     private lateinit var channel: MethodChannel
+    private lateinit var scanResultsChannel: EventChannel
     private lateinit var context: Context
+    private lateinit var bleScanner: BleScanner
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
+        bleScanner = BleScanner(context)
+
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_blue_background")
         channel.setMethodCallHandler(this)
+
+        scanResultsChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_blue_background/scan_results",
+        )
+        scanResultsChannel.setStreamHandler(bleScanner)
     }
 
     override fun onMethodCall(
@@ -46,6 +57,17 @@ class FlutterBlueBackgroundPlugin :
             }
             "isServiceRunning" -> {
                 result.success(FlutterBlueBackgroundService.isRunning)
+            }
+            "startScan" -> {
+                @Suppress("UNCHECKED_CAST")
+                val config = (call.arguments as? Map<String, Any?>) ?: emptyMap()
+                result.success(bleScanner.startScan(config))
+            }
+            "stopScan" -> {
+                result.success(bleScanner.stopScan())
+            }
+            "isScanning" -> {
+                result.success(bleScanner.isScanning)
             }
             else -> result.notImplemented()
         }
@@ -70,5 +92,7 @@ class FlutterBlueBackgroundPlugin :
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        scanResultsChannel.setStreamHandler(null)
+        bleScanner.dispose()
     }
 }

@@ -29,6 +29,26 @@ class MockFlutterBlueBackgroundPlatform
 
   @override
   Future<bool> isServiceRunning() => Future.value(running);
+
+  bool scanning = false;
+
+  @override
+  Future<bool> startScan(ScanConfig config) {
+    scanning = true;
+    return Future.value(true);
+  }
+
+  @override
+  Future<bool> stopScan() {
+    scanning = false;
+    return Future.value(true);
+  }
+
+  @override
+  Future<bool> isScanning() => Future.value(scanning);
+
+  @override
+  Stream<BleScanResult> get scanResults => const Stream.empty();
 }
 
 void main() {

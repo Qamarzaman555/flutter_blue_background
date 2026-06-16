@@ -2,12 +2,21 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/models/ble_scan_result.dart';
+import 'src/models/scan_config.dart';
 
 /// An implementation of [FlutterBlueBackgroundPlatform] that uses method channels.
 class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   /// The method channel used to interact with the native platform.
   @visibleForTesting
   final methodChannel = const MethodChannel('flutter_blue_background');
+
+  /// The event channel that streams BLE scan results from the native platform.
+  @visibleForTesting
+  final scanResultsChannel =
+      const EventChannel('flutter_blue_background/scan_results');
+
+  Stream<BleScanResult>? _scanResults;
 
   @override
   Future<String?> getPlatformVersion() async {
@@ -39,5 +48,34 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   Future<bool> isServiceRunning() async {
     final running = await methodChannel.invokeMethod<bool>('isServiceRunning');
     return running ?? false;
+  }
+
+  @override
+  Future<bool> startScan(ScanConfig config) async {
+    final started = await methodChannel.invokeMethod<bool>(
+      'startScan',
+      config.toMap(),
+    );
+    return started ?? false;
+  }
+
+  @override
+  Future<bool> stopScan() async {
+    final stopped = await methodChannel.invokeMethod<bool>('stopScan');
+    return stopped ?? false;
+  }
+
+  @override
+  Future<bool> isScanning() async {
+    final scanning = await methodChannel.invokeMethod<bool>('isScanning');
+    return scanning ?? false;
+  }
+
+  @override
+  Stream<BleScanResult> get scanResults {
+    _scanResults ??= scanResultsChannel
+        .receiveBroadcastStream()
+        .map((event) => BleScanResult.fromMap(event as Map<dynamic, dynamic>));
+    return _scanResults!;
   }
 }

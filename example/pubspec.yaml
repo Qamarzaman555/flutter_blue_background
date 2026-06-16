@@ -32,6 +32,7 @@ dependencies:
   # Used by the demo to request the runtime permissions (notifications and
   # nearby devices) required by the background service.
   permission_handler: ^11.3.1
+  get: ^4.7.3
 
 dev_dependencies:
   integration_test:
