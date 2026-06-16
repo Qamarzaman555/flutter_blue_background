@@ -19,14 +19,24 @@ import org.json.JSONObject
  */
 object ScanResultDispatcher {
 
+    private const val MAX_CACHE_SIZE = 256
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val lock = Any()
 
     @Volatile
     private var eventSink: EventChannel.EventSink? = null
 
-    /** Latest advertisement per deviceId; preserves discovery order. */
-    private val cache = LinkedHashMap<String, Map<String, Any?>>()
+    /** Bumped whenever the sink is detached so stale handler posts are ignored. */
+    @Volatile
+    private var sinkGeneration = 0
+
+    /** Latest advertisement per deviceId; LRU-evicted when [MAX_CACHE_SIZE] is hit. */
+    private val cache = object : LinkedHashMap<String, Map<String, Any?>>(MAX_CACHE_SIZE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, Any?>>?): Boolean {
+            return size > MAX_CACHE_SIZE
+        }
+    }
 
     @Volatile
     var isScanning: Boolean = false
@@ -37,12 +47,16 @@ object ScanResultDispatcher {
      * date.
      */
     fun setSink(sink: EventChannel.EventSink?) {
+        if (sink == null) {
+            eventSink = null
+            sinkGeneration++
+            return
+        }
         eventSink = sink
-        if (sink == null) return
+        val generation = sinkGeneration
         val snapshot = snapshot()
         mainHandler.post {
-            // Guard against the sink being swapped out between post and run.
-            if (eventSink === sink) {
+            if (eventSink === sink && generation == sinkGeneration) {
                 snapshot.forEach { sink.success(it) }
             }
         }
@@ -55,17 +69,33 @@ object ScanResultDispatcher {
             cache[id] = result
         }
         val sink = eventSink ?: return
-        mainHandler.post { sink.success(result) }
+        val generation = sinkGeneration
+        mainHandler.post {
+            if (eventSink === sink && generation == sinkGeneration) {
+                sink.success(result)
+            }
+        }
     }
 
     fun error(code: String, message: String?) {
         val sink = eventSink ?: return
-        mainHandler.post { sink.error(code, message, null) }
+        val generation = sinkGeneration
+        mainHandler.post {
+            if (eventSink === sink && generation == sinkGeneration) {
+                sink.error(code, message, null)
+            }
+        }
     }
 
     fun snapshot(): List<Map<String, Any?>> = synchronized(lock) { cache.values.toList() }
 
     fun clearCache() = synchronized(lock) { cache.clear() }
+
+    /** Clears scan state when the service is intentionally stopped. */
+    fun resetScanState() {
+        synchronized(lock) { cache.clear() }
+        isScanning = false
+    }
 }
 
 /**

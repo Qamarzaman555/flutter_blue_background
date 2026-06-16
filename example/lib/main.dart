@@ -100,6 +100,7 @@ class BleController extends GetxController {
 
   Future<void> stopService() async {
     final stopped = await _plugin.stopService();
+    isScanning.value = await _plugin.isScanning();
     status.value = stopped ? 'Service stopped' : 'Failed to stop';
     await _refreshRunningState();
   }

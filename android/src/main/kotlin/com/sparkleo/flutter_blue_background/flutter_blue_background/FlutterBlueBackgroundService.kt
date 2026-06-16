@@ -52,6 +52,10 @@ class FlutterBlueBackgroundService : Service() {
         // silently kill the service.
         private const val KEEP_ALIVE_INTERVAL_MS = 300_000L
 
+        // Wake lock is refreshed on each keep-alive tick so it cannot be held
+        // indefinitely if the service fails to tear down cleanly.
+        private const val WAKE_LOCK_TIMEOUT_MS = KEEP_ALIVE_INTERVAL_MS * 2
+
         private const val DEFAULT_NOTIFICATION_TITLE = "Background service"
         private const val DEFAULT_NOTIFICATION_CONTENT = "Running in the background"
 
@@ -170,10 +174,15 @@ class FlutterBlueBackgroundService : Service() {
         stopKeepAlive()
         releaseWakeLock()
 
+        // Always release the BluetoothLeScanner callback so we do not leak scan
+        // registrations when the service instance is torn down. A START_STICKY
+        // restart will resume scanning from persisted prefs in onStartCommand.
+        if (::bleScanner.isInitialized) {
+            bleScanner.dispose()
+        }
+
         if (isStopRequested) {
-            // Intentional stop: clear the persisted flags so we don't restart on
-            // boot or resume a scan.
-            bleScanner.stopScan()
+            ScanResultDispatcher.resetScanState()
             getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_SERVICE_ENABLED, false)
@@ -181,8 +190,6 @@ class FlutterBlueBackgroundService : Service() {
                 .remove(KEY_SCAN_CONFIG)
                 .apply()
         }
-        // Note: when the system kills the service unintentionally we deliberately
-        // do NOT stop the scanner here, so START_STICKY can resume it.
 
         isRunning = false
         super.onDestroy()
@@ -268,10 +275,15 @@ class FlutterBlueBackgroundService : Service() {
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "FlutterBlueBackground::ServiceWakeLock"
-            )
+            ).apply {
+                setReferenceCounted(false)
+            }
         }
-        if (wakeLock?.isHeld != true) {
-            wakeLock?.acquire()
+        wakeLock?.let { lock ->
+            if (lock.isHeld) {
+                lock.release()
+            }
+            lock.acquire(WAKE_LOCK_TIMEOUT_MS)
         }
     }
 

@@ -29,6 +29,7 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
 
     case "stopService":
       backgroundService.stop()
+      _ = bleScanner.stopScan()
       result(true)
 
     case "isServiceRunning":
@@ -57,6 +58,8 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
   }
 
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
-    bleScanner.dispose()
+    // Detach the sink only — do not stop scanning. The scan should keep running
+    // in the background while the UI/engine is gone (parity with Android).
+    bleScanner.detachSink()
   }
 }

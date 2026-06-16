@@ -18,6 +18,8 @@ import os.log
 /// are cached so `getScanResults()` works after the UI returns to foreground.
 class BleScanner: NSObject {
 
+    private static let maxCacheSize = 256
+
     private let log = OSLog(subsystem: "com.sparkleo.flutter_blue_background", category: "BleScanner")
 
     private var centralManager: CBCentralManager!
@@ -102,6 +104,13 @@ class BleScanner: NSObject {
 
     func dispose() {
         _ = stopScan()
+        detachSink()
+        clearCache()
+    }
+
+    /// Detaches the Flutter event sink without stopping an active scan. Used when
+    /// the engine is torn down but background scanning should continue.
+    func detachSink() {
         eventSink = nil
     }
 
@@ -122,6 +131,10 @@ class BleScanner: NSObject {
             cacheOrder.append(id)
         }
         cache[id] = payload
+        while cacheOrder.count > Self.maxCacheSize {
+            let evicted = cacheOrder.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
     }
 
     private func beginScan() {
@@ -232,7 +245,7 @@ extension BleScanner: FlutterStreamHandler {
     }
 
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSink = nil
+        detachSink()
         return nil
     }
 }
