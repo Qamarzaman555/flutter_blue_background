@@ -12,50 +12,40 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
-import io.flutter.plugin.common.EventChannel
 
 /**
- * Owns the [BluetoothLeScanner] and translates a Dart [ScanConfig] map into
- * native [ScanFilter] / [ScanSettings], emitting discovered devices onto an
- * [EventChannel].
+ * Owns the [BluetoothLeScanner] and translates a Dart `ScanConfig` map into
+ * native [ScanFilter] / [ScanSettings], emitting discovered devices through
+ * [ScanResultDispatcher].
+ *
+ * This is owned by [FlutterBlueBackgroundService] (not the Flutter plugin) so a
+ * running scan survives the Flutter engine being torn down — e.g. when the app
+ * is swiped away from recents while the foreground service keeps the process
+ * alive.
  *
  * Cross-platform filters that Android cannot do natively in a portable way
  * ([nameFilter] substring match and [rssiThreshold]) are applied client-side so
  * behaviour matches iOS.
  */
-class BleScanner(private val context: Context) : EventChannel.StreamHandler {
+class BleScanner(private val context: Context) {
 
     companion object {
         private const val TAG = "BleScanner"
     }
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-
-    private var eventSink: EventChannel.EventSink? = null
     private var scanner: BluetoothLeScanner? = null
     private var activeCallback: ScanCallback? = null
 
-    @Volatile
-    var isScanning: Boolean = false
-        private set
+    val isScanning: Boolean
+        get() = ScanResultDispatcher.isScanning
 
     // Client-side filters captured from the active config.
     private var nameFilter: String? = null
     private var skipUnnamedDevices: Boolean = false
     private var rssiThreshold: Int? = null
-
-    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-        eventSink = events
-    }
-
-    override fun onCancel(arguments: Any?) {
-        eventSink = null
-    }
 
     @SuppressLint("MissingPermission")
     fun startScan(config: Map<String, Any?>): Boolean {
@@ -85,6 +75,9 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
         skipUnnamedDevices = config["skipUnnamedDevices"] as? Boolean ?: false
         rssiThreshold = (config["rssiThreshold"] as? Number)?.toInt()
 
+        // Fresh scan: drop results cached from a previous one.
+        ScanResultDispatcher.clearCache()
+
         val filters = buildFilters(config)
         val settings = buildSettings(config)
 
@@ -99,14 +92,11 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
 
             override fun onScanFailed(errorCode: Int) {
                 Log.e(TAG, "Scan failed: $errorCode")
-                isScanning = false
-                mainHandler.post {
-                    eventSink?.error(
-                        "scan_failed",
-                        "BLE scan failed with error code $errorCode",
-                        null,
-                    )
-                }
+                ScanResultDispatcher.isScanning = false
+                ScanResultDispatcher.error(
+                    "scan_failed",
+                    "BLE scan failed with error code $errorCode",
+                )
             }
         }
 
@@ -114,7 +104,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
             leScanner.startScan(filters, settings, callback)
             scanner = leScanner
             activeCallback = callback
-            isScanning = true
+            ScanResultDispatcher.isScanning = true
             Log.d(TAG, "Scan started (filters=${filters.size})")
             true
         } catch (e: Exception) {
@@ -127,7 +117,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
     fun stopScan(): Boolean {
         val leScanner = scanner
         val callback = activeCallback
-        isScanning = false
+        ScanResultDispatcher.isScanning = false
         nameFilter = null
         skipUnnamedDevices = false
         rssiThreshold = null
@@ -191,7 +181,7 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
             "timestampMillis" to System.currentTimeMillis(),
         )
 
-        mainHandler.post { eventSink?.success(payload) }
+        ScanResultDispatcher.emit(payload)
     }
 
     /**
@@ -269,6 +259,5 @@ class BleScanner(private val context: Context) : EventChannel.StreamHandler {
 
     fun dispose() {
         stopScan()
-        eventSink = null
     }
 }

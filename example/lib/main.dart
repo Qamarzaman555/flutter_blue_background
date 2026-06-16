@@ -34,7 +34,7 @@ class BleController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _refreshRunningState();
+    _restoreState();
     _scanSub = _plugin.scanResults.listen((result) {
       devices[result.deviceId] = result;
     });
@@ -44,6 +44,26 @@ class BleController extends GetxController {
   void onClose() {
     _scanSub?.cancel();
     super.onClose();
+  }
+
+  /// Re-syncs the UI with whatever the native side is actually doing. After the
+  /// app is swiped from recents the foreground service keeps scanning, so on
+  /// reopen we restore the running/scanning flags and any devices found while
+  /// the UI was gone.
+  Future<void> _restoreState() async {
+    isRunning.value = await _plugin.isServiceRunning();
+    isScanning.value = await _plugin.isScanning();
+
+    final cached = await _plugin.getScanResults();
+    for (final result in cached) {
+      devices[result.deviceId] = result;
+    }
+
+    if (isScanning.value) {
+      status.value = 'Scanning...';
+    } else if (isRunning.value) {
+      status.value = 'Service started';
+    }
   }
 
   Future<void> _refreshRunningState() async {

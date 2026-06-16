@@ -78,4 +78,22 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
         .map((event) => BleScanResult.fromMap(event as Map<dynamic, dynamic>));
     return _scanResults!;
   }
+
+  @override
+  Future<List<BleScanResult>> getScanResults() async {
+    final results = await methodChannel.invokeMethod<List<dynamic>>(
+      'getScanResults',
+    );
+    if (results == null) return const [];
+    return results
+        .map((e) => BleScanResult.fromMap(e as Map<dynamic, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<bool> clearScanResults() async {
+    final cleared =
+        await methodChannel.invokeMethod<bool>('clearScanResults');
+    return cleared ?? false;
+  }
 }

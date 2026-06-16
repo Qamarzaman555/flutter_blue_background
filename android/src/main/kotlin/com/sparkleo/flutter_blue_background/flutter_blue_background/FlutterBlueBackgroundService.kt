@@ -36,9 +36,16 @@ class FlutterBlueBackgroundService : Service() {
         const val KEY_SERVICE_ENABLED = "service_enabled"
         const val KEY_NOTIFICATION_TITLE = "notification_title"
         const val KEY_NOTIFICATION_CONTENT = "notification_content"
+        const val KEY_SCAN_ENABLED = "scan_enabled"
+        const val KEY_SCAN_CONFIG = "scan_config"
 
         const val EXTRA_NOTIFICATION_TITLE = "notification_title"
         const val EXTRA_NOTIFICATION_CONTENT = "notification_content"
+        const val EXTRA_SCAN_CONFIG = "scan_config"
+
+        // Intent actions used by the plugin to drive the service.
+        const val ACTION_START_SCAN = "com.sparkleo.flutter_blue_background.START_SCAN"
+        const val ACTION_STOP_SCAN = "com.sparkleo.flutter_blue_background.STOP_SCAN"
 
         // Periodic keep-alive interval. Re-acquires the wake lock and refreshes
         // the notification so aggressive OEM power managers are less likely to
@@ -68,10 +75,13 @@ class FlutterBlueBackgroundService : Service() {
     private var notificationTitle: String = DEFAULT_NOTIFICATION_TITLE
     private var notificationContent: String = DEFAULT_NOTIFICATION_CONTENT
 
+    private lateinit var bleScanner: BleScanner
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         isStopRequested = false
+        bleScanner = BleScanner(applicationContext)
         createNotificationChannel()
         acquireWakeLock()
         Log.d(TAG, "Service created")
@@ -97,9 +107,52 @@ class FlutterBlueBackgroundService : Service() {
         startInForeground()
         startKeepAlive()
 
+        handleScanCommand(intent, prefs)
+
         Log.d(TAG, "Service started")
         // START_STICKY so the system recreates the service if it is killed.
         return START_STICKY
+    }
+
+    /**
+     * Applies the scan-related part of an incoming command:
+     * - [ACTION_STOP_SCAN] stops scanning and clears the persisted config.
+     * - [ACTION_START_SCAN] starts scanning with the supplied config and
+     *   persists it so it can be resumed after a START_STICKY restart.
+     * - A null intent (system restart) resumes a previously persisted scan.
+     */
+    private fun handleScanCommand(intent: Intent?, prefs: android.content.SharedPreferences) {
+        when (intent?.action) {
+            ACTION_STOP_SCAN -> {
+                bleScanner.stopScan()
+                prefs.edit()
+                    .putBoolean(KEY_SCAN_ENABLED, false)
+                    .remove(KEY_SCAN_CONFIG)
+                    .apply()
+            }
+
+            ACTION_START_SCAN -> {
+                val json = intent.getStringExtra(EXTRA_SCAN_CONFIG)
+                if (json != null) {
+                    prefs.edit()
+                        .putBoolean(KEY_SCAN_ENABLED, true)
+                        .putString(KEY_SCAN_CONFIG, json)
+                        .apply()
+                    bleScanner.startScan(ScanConfigCodec.decode(json))
+                }
+            }
+
+            else -> {
+                // Null intent (system restart) or a plain start: resume scan if
+                // one was active.
+                if (prefs.getBoolean(KEY_SCAN_ENABLED, false) && !bleScanner.isScanning) {
+                    val json = prefs.getString(KEY_SCAN_CONFIG, null)
+                    if (json != null) {
+                        bleScanner.startScan(ScanConfigCodec.decode(json))
+                    }
+                }
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -118,12 +171,18 @@ class FlutterBlueBackgroundService : Service() {
         releaseWakeLock()
 
         if (isStopRequested) {
-            // Intentional stop: clear the persisted flag so we don't restart on boot.
+            // Intentional stop: clear the persisted flags so we don't restart on
+            // boot or resume a scan.
+            bleScanner.stopScan()
             getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_SERVICE_ENABLED, false)
+                .putBoolean(KEY_SCAN_ENABLED, false)
+                .remove(KEY_SCAN_CONFIG)
                 .apply()
         }
+        // Note: when the system kills the service unintentionally we deliberately
+        // do NOT stop the scanner here, so START_STICKY can resume it.
 
         isRunning = false
         super.onDestroy()

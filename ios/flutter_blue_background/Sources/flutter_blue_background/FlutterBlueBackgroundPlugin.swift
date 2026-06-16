@@ -44,6 +44,13 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
     case "isScanning":
       result(bleScanner.isScanning)
 
+    case "getScanResults":
+      result(bleScanner.getScanResults())
+
+    case "clearScanResults":
+      bleScanner.clearCache()
+      result(true)
+
     default:
       result(FlutterMethodNotImplemented)
     }

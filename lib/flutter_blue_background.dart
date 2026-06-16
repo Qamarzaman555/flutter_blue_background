@@ -1,4 +1,3 @@
-
 import 'flutter_blue_background_platform_interface.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/scan_config.dart';
@@ -58,4 +57,16 @@ class FlutterBlueBackground {
   /// A broadcast stream of BLE devices discovered during a scan.
   Stream<BleScanResult> get scanResults =>
       FlutterBlueBackgroundPlatform.instance.scanResults;
+
+  /// Returns the cached snapshot of devices discovered during the current or
+  /// most recent scan. On Android this includes devices found while the app UI
+  /// was gone but the foreground service kept scanning.
+  Future<List<BleScanResult>> getScanResults() {
+    return FlutterBlueBackgroundPlatform.instance.getScanResults();
+  }
+
+  /// Clears the cached scan results.
+  Future<bool> clearScanResults() {
+    return FlutterBlueBackgroundPlatform.instance.clearScanResults();
+  }
 }

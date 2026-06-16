@@ -1,4 +1,4 @@
-allowImageUploadimport CoreBluetooth
+import CoreBluetooth
 import Flutter
 import Foundation
 import os.log
@@ -10,6 +10,12 @@ import os.log
 /// CoreBluetooth only filters natively by service UUID. The remaining
 /// cross-platform filters (`nameFilter` substring match and `rssiThreshold`)
 /// are applied client-side in `didDiscover` so behaviour matches Android.
+///
+/// Unlike Android — where the scanner lives in a foreground service — iOS has no
+/// equivalent. Background BLE execution relies on the `bluetooth-central`
+/// UIBackgroundMode keeping this plugin-owned `CBCentralManager` alive while the
+/// app is backgrounded (a force-quit still tears it down). Discovered devices
+/// are cached so `getScanResults()` works after the UI returns to foreground.
 class BleScanner: NSObject {
 
     private let log = OSLog(subsystem: "com.sparkleo.flutter_blue_background", category: "BleScanner")
@@ -18,6 +24,10 @@ class BleScanner: NSObject {
     private var eventSink: FlutterEventSink?
 
     private(set) var isScanning = false
+
+    // Latest advertisement per deviceId; preserves discovery order.
+    private var cache: [String: [String: Any]] = [:]
+    private var cacheOrder: [String] = []
 
     // Pending scan parameters, applied once the central manager powers on.
     private var pendingServiceUuids: [CBUUID]?
@@ -47,6 +57,8 @@ class BleScanner: NSObject {
         nameFilter = (config["nameFilter"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         skipUnnamedDevices = (config["skipUnnamedDevices"] as? Bool) ?? false
         rssiThreshold = config["rssiThreshold"] as? Int
+
+        clearCache()
 
         var options: [String: Any] = [:]
         if let ios = config["ios"] as? [String: Any] {
@@ -93,7 +105,24 @@ class BleScanner: NSObject {
         eventSink = nil
     }
 
+    /// Cached snapshot of devices discovered during the current/last scan.
+    func getScanResults() -> [[String: Any]] {
+        return cacheOrder.compactMap { cache[$0] }
+    }
+
+    func clearCache() {
+        cache.removeAll()
+        cacheOrder.removeAll()
+    }
+
     // MARK: - Internal
+
+    private func cacheResult(_ id: String, _ payload: [String: Any]) {
+        if cache[id] == nil {
+            cacheOrder.append(id)
+        }
+        cache[id] = payload
+    }
 
     private func beginScan() {
         centralManager.scanForPeripherals(
@@ -181,6 +210,7 @@ extension BleScanner: CBCentralManagerDelegate {
             payload["serviceData"] = mapped
         }
 
+        cacheResult(peripheral.identifier.uuidString, payload)
         eventSink?(payload)
     }
 }
@@ -193,6 +223,11 @@ extension BleScanner: FlutterStreamHandler {
         eventSink events: @escaping FlutterEventSink
     ) -> FlutterError? {
         eventSink = events
+        // Replay cached results so a freshly attached listener catches up on
+        // devices discovered while it was not listening.
+        for payload in getScanResults() {
+            events(payload)
+        }
         return nil
     }
 

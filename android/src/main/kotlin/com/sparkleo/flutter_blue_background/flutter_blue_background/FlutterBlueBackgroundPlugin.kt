@@ -21,11 +21,9 @@ class FlutterBlueBackgroundPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var scanResultsChannel: EventChannel
     private lateinit var context: Context
-    private lateinit var bleScanner: BleScanner
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
-        bleScanner = BleScanner(context)
 
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_blue_background")
         channel.setMethodCallHandler(this)
@@ -34,7 +32,18 @@ class FlutterBlueBackgroundPlugin :
             flutterPluginBinding.binaryMessenger,
             "flutter_blue_background/scan_results",
         )
-        scanResultsChannel.setStreamHandler(bleScanner)
+        // Bridge the engine-bound event channel to the process-wide dispatcher so
+        // results produced by the service-owned scanner reach Dart, and so the
+        // cache is replayed whenever a fresh engine attaches.
+        scanResultsChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                ScanResultDispatcher.setSink(events)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                ScanResultDispatcher.setSink(null)
+            }
+        })
     }
 
     override fun onMethodCall(
@@ -48,7 +57,7 @@ class FlutterBlueBackgroundPlugin :
             "startService" -> {
                 val title = call.argument<String>("notificationTitle")
                 val content = call.argument<String>("notificationContent")
-                startService(title, content)
+                startService(title, content, null, null)
                 result.success(true)
             }
             "stopService" -> {
@@ -61,22 +70,60 @@ class FlutterBlueBackgroundPlugin :
             "startScan" -> {
                 @Suppress("UNCHECKED_CAST")
                 val config = (call.arguments as? Map<String, Any?>) ?: emptyMap()
-                result.success(bleScanner.startScan(config))
+                // Scanning runs inside the foreground service so it survives the
+                // app being removed from recents. Starting the scan (re)starts
+                // the service with the scan action.
+                val json = ScanConfigCodec.encode(config)
+                startService(null, null, FlutterBlueBackgroundService.ACTION_START_SCAN, json)
+                result.success(true)
             }
             "stopScan" -> {
-                result.success(bleScanner.stopScan())
+                if (FlutterBlueBackgroundService.isRunning) {
+                    startService(null, null, FlutterBlueBackgroundService.ACTION_STOP_SCAN, null)
+                } else {
+                    ScanResultDispatcher.isScanning = false
+                }
+                result.success(true)
             }
             "isScanning" -> {
-                result.success(bleScanner.isScanning)
+                result.success(isScanningState())
+            }
+            "getScanResults" -> {
+                result.success(ScanResultDispatcher.snapshot())
+            }
+            "clearScanResults" -> {
+                ScanResultDispatcher.clearCache()
+                result.success(true)
             }
             else -> result.notImplemented()
         }
     }
 
-    private fun startService(title: String?, content: String?) {
+    /**
+     * Whether a scan is (or should be) running. Prefers the live runtime flag,
+     * but falls back to the persisted intent so the state survives a full
+     * process restart where the service may still be resuming the scan.
+     */
+    private fun isScanningState(): Boolean {
+        if (ScanResultDispatcher.isScanning) return true
+        val prefs = context.getSharedPreferences(
+            FlutterBlueBackgroundService.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        return prefs.getBoolean(FlutterBlueBackgroundService.KEY_SCAN_ENABLED, false)
+    }
+
+    private fun startService(
+        title: String?,
+        content: String?,
+        action: String?,
+        scanConfigJson: String?,
+    ) {
         val serviceIntent = Intent(context, FlutterBlueBackgroundService::class.java).apply {
+            action?.let { this.action = it }
             title?.let { putExtra(FlutterBlueBackgroundService.EXTRA_NOTIFICATION_TITLE, it) }
             content?.let { putExtra(FlutterBlueBackgroundService.EXTRA_NOTIFICATION_CONTENT, it) }
+            scanConfigJson?.let { putExtra(FlutterBlueBackgroundService.EXTRA_SCAN_CONFIG, it) }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
@@ -93,6 +140,8 @@ class FlutterBlueBackgroundPlugin :
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         scanResultsChannel.setStreamHandler(null)
-        bleScanner.dispose()
+        // Detach the sink only. The scanner lives in the foreground service and
+        // must keep running while the engine is gone (e.g. app swiped away).
+        ScanResultDispatcher.setSink(null)
     }
 }

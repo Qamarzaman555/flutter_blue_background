@@ -49,6 +49,12 @@ class MockFlutterBlueBackgroundPlatform
 
   @override
   Stream<BleScanResult> get scanResults => const Stream.empty();
+
+  @override
+  Future<List<BleScanResult>> getScanResults() => Future.value(const []);
+
+  @override
+  Future<bool> clearScanResults() => Future.value(true);
 }
 
 void main() {

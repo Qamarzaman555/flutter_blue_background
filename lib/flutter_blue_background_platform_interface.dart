@@ -69,4 +69,19 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   Stream<BleScanResult> get scanResults {
     throw UnimplementedError('scanResults has not been implemented.');
   }
+
+  /// Returns the cached snapshot of devices discovered during the current or
+  /// most recent scan.
+  ///
+  /// Useful after returning to the foreground: on Android the scan keeps running
+  /// inside the foreground service while the UI is gone, so this returns
+  /// everything found in the meantime.
+  Future<List<BleScanResult>> getScanResults() {
+    throw UnimplementedError('getScanResults() has not been implemented.');
+  }
+
+  /// Clears the cached scan results.
+  Future<bool> clearScanResults() {
+    throw UnimplementedError('clearScanResults() has not been implemented.');
+  }
 }
