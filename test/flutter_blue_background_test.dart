@@ -30,6 +30,14 @@ class MockFlutterBlueBackgroundPlatform
   @override
   Future<bool> isServiceRunning() => Future.value(running);
 
+  @override
+  Future<BleAdapterState> getAdapterState() =>
+      Future.value(BleAdapterState.on);
+
+  @override
+  Stream<BleAdapterState> get adapterState =>
+      Stream.value(BleAdapterState.on);
+
   bool scanning = false;
 
   @override

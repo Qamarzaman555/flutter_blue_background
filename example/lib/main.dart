@@ -17,12 +17,14 @@ class BleController extends GetxController {
 
   final isRunning = false.obs;
   final isScanning = false.obs;
+  final adapterState = BleAdapterState.unknown.obs;
   final status = 'Idle'.obs;
 
   /// Keyed by deviceId so repeated advertisements update in place.
   final RxMap<String, BleScanResult> devices = <String, BleScanResult>{}.obs;
 
   StreamSubscription<BleScanResult>? _scanSub;
+  StreamSubscription<BleAdapterState>? _adapterSub;
 
   /// Devices sorted by signal strength (strongest first).
   List<BleScanResult> get sortedDevices {
@@ -39,6 +41,13 @@ class BleController extends GetxController {
     super.onInit();
     _restoreState();
     _scanSub = _plugin.scanResults.listen(_addResult);
+    _adapterSub = _plugin.adapterState.listen((state) {
+      adapterState.value = state;
+      if (!state.canScan && isScanning.value) {
+        isScanning.value = false;
+        status.value = 'Bluetooth off — scan stopped';
+      }
+    });
   }
 
   void _addResult(BleScanResult result) {
@@ -49,6 +58,7 @@ class BleController extends GetxController {
   @override
   void onClose() {
     _scanSub?.cancel();
+    _adapterSub?.cancel();
     super.onClose();
   }
 
@@ -59,6 +69,7 @@ class BleController extends GetxController {
   Future<void> _restoreState() async {
     isRunning.value = await _plugin.isServiceRunning();
     isScanning.value = await _plugin.isScanning();
+    adapterState.value = await _plugin.getAdapterState();
 
     final cached = await _plugin.getScanResults();
     for (final result in cached) {
@@ -112,8 +123,18 @@ class BleController extends GetxController {
   }
 
   Future<void> startScan() async {
+    if (!isRunning.value) {
+      status.value = 'Start the service first';
+      return;
+    }
+
     if (!await _ensurePermissions()) {
       status.value = 'Bluetooth permission denied';
+      return;
+    }
+
+    if (!adapterState.value.canScan) {
+      status.value = 'Bluetooth is ${adapterState.value.name}';
       return;
     }
 
@@ -128,12 +149,12 @@ class BleController extends GetxController {
       rssiThreshold: -180,
       android: AndroidScanSettings(scanMode: AndroidScanMode.lowLatency),
       ios: IosScanOptions(allowDuplicates: true),
-      timeout: Duration(seconds: 10),
     );
 
     final started = await _plugin.startScan(config);
     isScanning.value = started;
-    status.value = started ? 'Scanning...' : 'Failed to start scan';
+    status.value =
+        started ? 'Scanning...' : 'Failed to start scan (is Bluetooth on?)';
   }
 
   Future<void> stopScan() async {
@@ -180,6 +201,13 @@ class HomePage extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Obx(
+              () => Text(
+                'Bluetooth: ${controller.adapterState.value.name.toUpperCase()}',
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Obx(
               () => Text(controller.status.value, textAlign: TextAlign.center),
             ),
             const SizedBox(height: 16),
@@ -212,7 +240,9 @@ class HomePage extends StatelessWidget {
                 children: [
                   Expanded(
                     child: FilledButton.tonal(
-                      onPressed: controller.isScanning.value
+                      onPressed: !controller.isRunning.value ||
+                              controller.isScanning.value ||
+                              !controller.adapterState.value.canScan
                           ? null
                           : controller.startScan,
                       child: const Text('Start scan'),

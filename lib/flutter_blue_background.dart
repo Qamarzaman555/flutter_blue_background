@@ -1,7 +1,9 @@
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/scan_config.dart';
 
+export 'src/models/ble_adapter_state.dart';
 export 'src/models/ble_scan_result.dart';
 export 'src/models/scan_config.dart';
 
@@ -35,6 +37,15 @@ class FlutterBlueBackground {
   Future<bool> isServiceRunning() {
     return FlutterBlueBackgroundPlatform.instance.isServiceRunning();
   }
+
+  /// Returns the current Bluetooth adapter (radio) state.
+  Future<BleAdapterState> getAdapterState() {
+    return FlutterBlueBackgroundPlatform.instance.getAdapterState();
+  }
+
+  /// A stream of Bluetooth adapter state changes.
+  Stream<BleAdapterState> get adapterState =>
+      FlutterBlueBackgroundPlatform.instance.adapterState;
 
   /// Starts a BLE scan using [config].
   ///

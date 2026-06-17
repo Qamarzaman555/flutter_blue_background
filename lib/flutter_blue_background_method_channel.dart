@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/scan_config.dart';
 
@@ -16,7 +17,13 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   final scanResultsChannel =
       const EventChannel('flutter_blue_background/scan_results');
 
+  /// The event channel that streams Bluetooth adapter state changes.
+  @visibleForTesting
+  final adapterStateChannel =
+      const EventChannel('flutter_blue_background/adapter_state');
+
   Stream<BleScanResult>? _scanResults;
+  Stream<BleAdapterState>? _adapterState;
 
   @override
   Future<String?> getPlatformVersion() async {
@@ -48,6 +55,20 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   Future<bool> isServiceRunning() async {
     final running = await methodChannel.invokeMethod<bool>('isServiceRunning');
     return running ?? false;
+  }
+
+  @override
+  Future<BleAdapterState> getAdapterState() async {
+    final state = await methodChannel.invokeMethod<String>('getAdapterState');
+    return BleAdapterState.fromNative(state);
+  }
+
+  @override
+  Stream<BleAdapterState> get adapterState {
+    _adapterState ??= adapterStateChannel
+        .receiveBroadcastStream()
+        .map((event) => BleAdapterState.fromNative(event as String?));
+    return _adapterState!;
   }
 
   @override

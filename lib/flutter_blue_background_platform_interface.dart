@@ -1,6 +1,7 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_blue_background_method_channel.dart';
+import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/scan_config.dart';
 
@@ -48,6 +49,16 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   /// Whether the native background service is currently running.
   Future<bool> isServiceRunning() {
     throw UnimplementedError('isServiceRunning() has not been implemented.');
+  }
+
+  /// Returns the current Bluetooth adapter (radio) state.
+  Future<BleAdapterState> getAdapterState() {
+    throw UnimplementedError('getAdapterState() has not been implemented.');
+  }
+
+  /// A stream of Bluetooth adapter state changes.
+  Stream<BleAdapterState> get adapterState {
+    throw UnimplementedError('adapterState has not been implemented.');
   }
 
   /// Starts a BLE scan using [config].

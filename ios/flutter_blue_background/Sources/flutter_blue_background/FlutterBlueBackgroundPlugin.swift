@@ -4,6 +4,7 @@ import UIKit
 public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
   private let backgroundService = BackgroundService.shared
   private let bleScanner = BleScanner()
+  private var adapterStateStreamHandler: BleAdapterStateStreamHandler?
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "flutter_blue_background", binaryMessenger: registrar.messenger())
@@ -15,6 +16,14 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
       binaryMessenger: registrar.messenger()
     )
     scanResultsChannel.setStreamHandler(instance.bleScanner)
+
+    let adapterStateHandler = BleAdapterStateStreamHandler(scanner: instance.bleScanner)
+    instance.adapterStateStreamHandler = adapterStateHandler
+    let adapterStateChannel = FlutterEventChannel(
+      name: "flutter_blue_background/adapter_state",
+      binaryMessenger: registrar.messenger()
+    )
+    adapterStateChannel.setStreamHandler(adapterStateHandler)
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -22,8 +31,10 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
     case "getPlatformVersion":
       result("iOS " + UIDevice.current.systemVersion)
 
+    case "getAdapterState":
+      result(bleScanner.getAdapterState())
+
     case "startService":
-      // notificationTitle / notificationContent are Android-only and ignored on iOS.
       backgroundService.start()
       result(true)
 
@@ -36,6 +47,12 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
       result(backgroundService.isServiceRunning())
 
     case "startScan":
+      // Scanning requires the background service to be started first; it must
+      // not implicitly start it.
+      guard backgroundService.isServiceRunning() else {
+        result(false)
+        return
+      }
       let config = (call.arguments as? [String: Any]) ?? [:]
       result(bleScanner.startScan(config))
 
@@ -58,8 +75,8 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
   }
 
   public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
-    // Detach the sink only — do not stop scanning. The scan should keep running
-    // in the background while the UI/engine is gone (parity with Android).
     bleScanner.detachSink()
+    bleScanner.detachAdapterStateSink()
+    adapterStateStreamHandler = nil
   }
 }

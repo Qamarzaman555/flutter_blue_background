@@ -5,8 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -76,6 +79,7 @@ class FlutterBlueBackgroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var keepAliveRunnable: Runnable? = null
     private var scanTimeoutRunnable: Runnable? = null
+    private var adapterStateReceiver: BroadcastReceiver? = null
 
     private var notificationTitle: String = DEFAULT_NOTIFICATION_TITLE
     private var notificationContent: String = DEFAULT_NOTIFICATION_CONTENT
@@ -89,6 +93,7 @@ class FlutterBlueBackgroundService : Service() {
         bleScanner = BleScanner(applicationContext)
         createNotificationChannel()
         acquireWakeLock()
+        registerAdapterStateReceiver()
         Log.d(TAG, "Service created")
     }
 
@@ -195,6 +200,60 @@ class FlutterBlueBackgroundService : Service() {
         scanTimeoutRunnable = null
     }
 
+    /**
+     * Listens for the system Bluetooth adapter turning off so the running scan
+     * can be stopped.
+     *
+     * Without this, toggling Bluetooth off does NOT stop the LE scan: Android
+     * may keep the radio in the hidden `BLE_ON` sub-state, so the scan callback
+     * keeps firing (spamming "BT not enabled. Cannot get Remote Device name" and
+     * burning CPU under the wake lock). Turning Bluetooth back on does NOT
+     * auto-resume — the caller must start a new scan explicitly.
+     */
+    private fun registerAdapterStateReceiver() {
+        if (adapterStateReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+                when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                    BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF ->
+                        onBluetoothOff()
+                }
+            }
+        }
+        adapterStateReceiver = receiver
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
+    }
+
+    private fun unregisterAdapterStateReceiver() {
+        adapterStateReceiver?.let { runCatching { unregisterReceiver(it) } }
+        adapterStateReceiver = null
+    }
+
+    /**
+     * Stops the active scan and clears the persisted scan intent so it does not
+     * resume — neither when Bluetooth comes back on nor after a START_STICKY
+     * restart. `isScanning()` reports false afterwards.
+     */
+    private fun onBluetoothOff() {
+        if (!bleScanner.isScanning) return
+        Log.d(TAG, "Bluetooth turned off; stopping scan")
+        cancelScanTimeout()
+        bleScanner.stopScan()
+        ScanResultDispatcher.isScanning = false
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SCAN_ENABLED, false)
+            .remove(KEY_SCAN_CONFIG)
+            .apply()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -209,6 +268,7 @@ class FlutterBlueBackgroundService : Service() {
         Log.d(TAG, "Service destroyed (stopRequested=$isStopRequested)")
         stopKeepAlive()
         cancelScanTimeout()
+        unregisterAdapterStateReceiver()
         releaseWakeLock()
 
         // Always release the BluetoothLeScanner callback so we do not leak scan

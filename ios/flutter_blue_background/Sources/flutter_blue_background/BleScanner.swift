@@ -24,6 +24,7 @@ class BleScanner: NSObject {
 
     private var centralManager: CBCentralManager!
     private var eventSink: FlutterEventSink?
+    private var adapterStateSink: FlutterEventSink?
 
     private(set) var isScanning = false
 
@@ -51,14 +52,13 @@ class BleScanner: NSObject {
     }
 
     deinit {
-        // Final safety net: ensure no timer, scan, or delegate callback can
-        // outlive this instance.
         cancelTimeoutTimer()
         if centralManager?.isScanning == true {
             centralManager.stopScan()
         }
         centralManager?.delegate = nil
         eventSink = nil
+        adapterStateSink = nil
     }
 
     // MARK: - Public API
@@ -93,15 +93,18 @@ class BleScanner: NSObject {
             centralManager.stopScan()
         }
 
-        if centralManager.state == .poweredOn {
+        switch centralManager.state {
+        case .unsupported, .unauthorized:
+            return false
+        case .poweredOn:
             beginScan()
             return true
+        default:
+            // Defer until the central manager powers on.
+            hasPendingScan = true
+            os_log("Bluetooth not powered on yet; scan deferred", log: log, type: .info)
+            return true
         }
-
-        // Defer until the central manager powers on.
-        hasPendingScan = true
-        os_log("Bluetooth not powered on yet; scan deferred", log: log, type: .info)
-        return true
     }
 
     func stopScan() -> Bool {
@@ -128,6 +131,42 @@ class BleScanner: NSObject {
     /// the engine is torn down but background scanning should continue.
     func detachSink() {
         eventSink = nil
+    }
+
+    func setAdapterStateSink(_ sink: @escaping FlutterEventSink) {
+        adapterStateSink = sink
+        sink(mapAdapterState(centralManager.state))
+    }
+
+    func detachAdapterStateSink() {
+        adapterStateSink = nil
+    }
+
+    func getAdapterState() -> String {
+        mapAdapterState(centralManager.state)
+    }
+
+    private func emitAdapterState() {
+        adapterStateSink?(mapAdapterState(centralManager.state))
+    }
+
+    private func mapAdapterState(_ state: CBManagerState) -> String {
+        switch state {
+        case .poweredOn:
+            return "on"
+        case .poweredOff:
+            return "off"
+        case .resetting:
+            return "turningOn"
+        case .unauthorized:
+            return "unauthorized"
+        case .unsupported:
+            return "unsupported"
+        case .unknown:
+            return "unknown"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     /// Cached snapshot of devices discovered during the current/last scan.
@@ -196,10 +235,16 @@ class BleScanner: NSObject {
 extension BleScanner: CBCentralManagerDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        emitAdapterState()
         if central.state == .poweredOn, hasPendingScan {
             beginScan()
         } else if central.state != .poweredOn {
             isScanning = false
+            hasPendingScan = false
+            cancelTimeoutTimer()
+            if central.isScanning {
+                central.stopScan()
+            }
         }
     }
 
