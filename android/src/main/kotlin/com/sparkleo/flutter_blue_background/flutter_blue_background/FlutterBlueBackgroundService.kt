@@ -45,10 +45,15 @@ class FlutterBlueBackgroundService : Service() {
         const val EXTRA_NOTIFICATION_TITLE = "notification_title"
         const val EXTRA_NOTIFICATION_CONTENT = "notification_content"
         const val EXTRA_SCAN_CONFIG = "scan_config"
+        const val EXTRA_DEVICE_ID = "device_id"
+        const val EXTRA_CONNECT_CONFIG = "connect_config"
+        const val EXTRA_DISCONNECT_CONFIG = "disconnect_config"
 
         // Intent actions used by the plugin to drive the service.
         const val ACTION_START_SCAN = "com.sparkleo.flutter_blue_background.START_SCAN"
         const val ACTION_STOP_SCAN = "com.sparkleo.flutter_blue_background.STOP_SCAN"
+        const val ACTION_CONNECT = "com.sparkleo.flutter_blue_background.CONNECT"
+        const val ACTION_DISCONNECT = "com.sparkleo.flutter_blue_background.DISCONNECT"
 
         // Periodic keep-alive interval. Re-acquires the wake lock and refreshes
         // the notification so aggressive OEM power managers are less likely to
@@ -85,12 +90,15 @@ class FlutterBlueBackgroundService : Service() {
     private var notificationContent: String = DEFAULT_NOTIFICATION_CONTENT
 
     private lateinit var bleScanner: BleScanner
+    private lateinit var bleConnector: BleConnector
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
         isStopRequested = false
         bleScanner = BleScanner(applicationContext)
+        bleConnector = BleConnector(applicationContext)
+        BleConnectorHolder.connector = bleConnector
         createNotificationChannel()
         acquireWakeLock()
         registerAdapterStateReceiver()
@@ -118,6 +126,7 @@ class FlutterBlueBackgroundService : Service() {
         startKeepAlive()
 
         handleScanCommand(intent, prefs)
+        handleConnectCommand(intent)
 
         Log.d(TAG, "Service started")
         // START_STICKY so the system recreates the service if it is killed.
@@ -242,16 +251,46 @@ class FlutterBlueBackgroundService : Service() {
      * restart. `isScanning()` reports false afterwards.
      */
     private fun onBluetoothOff() {
-        if (!bleScanner.isScanning) return
-        Log.d(TAG, "Bluetooth turned off; stopping scan")
-        cancelScanTimeout()
-        bleScanner.stopScan()
-        ScanResultDispatcher.isScanning = false
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_SCAN_ENABLED, false)
-            .remove(KEY_SCAN_CONFIG)
-            .apply()
+        if (bleScanner.isScanning) {
+            Log.d(TAG, "Bluetooth turned off; stopping scan")
+            cancelScanTimeout()
+            bleScanner.stopScan()
+            ScanResultDispatcher.isScanning = false
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_SCAN_ENABLED, false)
+                .remove(KEY_SCAN_CONFIG)
+                .apply()
+        }
+
+        if (::bleConnector.isInitialized) {
+            Log.d(TAG, "Bluetooth turned off; disconnecting GATT clients")
+            bleConnector.onBluetoothAdapterOff()
+            BleConnectorHolder.connector = bleConnector
+        }
+    }
+
+    private fun handleConnectCommand(intent: Intent?) {
+        if (!::bleConnector.isInitialized) return
+        when (intent?.action) {
+            ACTION_CONNECT -> {
+                if (!BleAdapterState.isReady(applicationContext)) {
+                    Log.w(TAG, "Ignoring connect — Bluetooth adapter not ready")
+                    return
+                }
+                val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: return
+                val json = intent.getStringExtra(EXTRA_CONNECT_CONFIG) ?: return
+                val config = ScanConfigCodec.decode(json)
+                bleConnector.connect(deviceId, config)
+            }
+
+            ACTION_DISCONNECT -> {
+                val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: return
+                val json = intent.getStringExtra(EXTRA_DISCONNECT_CONFIG)
+                val config = json?.let { ScanConfigCodec.decode(it) } ?: emptyMap()
+                bleConnector.disconnect(deviceId, config)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -278,8 +317,14 @@ class FlutterBlueBackgroundService : Service() {
             bleScanner.dispose()
         }
 
+        if (::bleConnector.isInitialized) {
+            bleConnector.dispose()
+            BleConnectorHolder.connector = null
+        }
+
         if (isStopRequested) {
             ScanResultDispatcher.resetScanState()
+            ConnectionStateDispatcher.reset()
             getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(KEY_SERVICE_ENABLED, false)

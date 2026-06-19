@@ -1,10 +1,16 @@
 import 'flutter_blue_background_platform_interface.dart';
 import 'src/models/ble_adapter_state.dart';
+import 'src/models/ble_connection_state.dart';
+import 'src/models/ble_gatt_service.dart';
 import 'src/models/ble_scan_result.dart';
+import 'src/models/connect_config.dart';
 import 'src/models/scan_config.dart';
 
 export 'src/models/ble_adapter_state.dart';
+export 'src/models/ble_connection_state.dart';
+export 'src/models/ble_gatt_service.dart';
 export 'src/models/ble_scan_result.dart';
+export 'src/models/connect_config.dart';
 export 'src/models/scan_config.dart';
 
 class FlutterBlueBackground {
@@ -79,5 +85,68 @@ class FlutterBlueBackground {
   /// Clears the cached scan results.
   Future<bool> clearScanResults() {
     return FlutterBlueBackgroundPlatform.instance.clearScanResults();
+  }
+
+  /// Connects to [deviceId] (from [BleScanResult.deviceId]) using [config].
+  ///
+  /// Requires [startService] to be running first. When [ConnectConfig.autoConnect]
+  /// is true, this returns once the native connect is initiated; listen to
+  /// [connectionState] for the connected event.
+  Future<bool> connect(
+    String deviceId, [
+    ConnectConfig config = const ConnectConfig(),
+  ]) {
+    return FlutterBlueBackgroundPlatform.instance.connect(deviceId, config);
+  }
+
+  /// Disconnects from [deviceId].
+  Future<bool> disconnect(
+    String deviceId, [
+    DisconnectConfig config = const DisconnectConfig(),
+  ]) {
+    return FlutterBlueBackgroundPlatform.instance.disconnect(deviceId, config);
+  }
+
+  /// Cached connection state for [deviceId].
+  Future<BleConnectionState> getConnectionState(String deviceId) {
+    return FlutterBlueBackgroundPlatform.instance.getConnectionState(deviceId);
+  }
+
+  /// Device ids currently connected.
+  Future<List<String>> getConnectedDevices() {
+    return FlutterBlueBackgroundPlatform.instance.getConnectedDevices();
+  }
+
+  /// Broadcast stream of GATT connection state changes.
+  Stream<BleConnectionEvent> get connectionState =>
+      FlutterBlueBackgroundPlatform.instance.connectionState;
+
+  /// Requests a larger ATT MTU (Android only).
+  Future<int> requestMtu(String deviceId, int mtu) {
+    return FlutterBlueBackgroundPlatform.instance.requestMtu(deviceId, mtu);
+  }
+
+  /// Requests a connection priority update (Android only).
+  Future<void> requestConnectionPriority(
+    String deviceId,
+    ConnectionPriority priority,
+  ) {
+    return FlutterBlueBackgroundPlatform.instance.requestConnectionPriority(
+      deviceId,
+      priority,
+    );
+  }
+
+  /// Discovers GATT services on a connected device.
+  Future<List<BleGattService>> discoverServices(
+    String deviceId, {
+    Duration timeout = const Duration(seconds: 15),
+    bool subscribeToServicesChanged = true,
+  }) {
+    return FlutterBlueBackgroundPlatform.instance.discoverServices(
+      deviceId,
+      timeout: timeout,
+      subscribeToServicesChanged: subscribeToServicesChanged,
+    );
   }
 }

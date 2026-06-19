@@ -2,7 +2,10 @@ import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_blue_background_method_channel.dart';
 import 'src/models/ble_adapter_state.dart';
+import 'src/models/ble_connection_state.dart';
+import 'src/models/ble_gatt_service.dart';
 import 'src/models/ble_scan_result.dart';
+import 'src/models/connect_config.dart';
 import 'src/models/scan_config.dart';
 
 abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
@@ -11,7 +14,8 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
 
   static final Object _token = Object();
 
-  static FlutterBlueBackgroundPlatform _instance = MethodChannelFlutterBlueBackground();
+  static FlutterBlueBackgroundPlatform _instance =
+      MethodChannelFlutterBlueBackground();
 
   /// The default instance of [FlutterBlueBackgroundPlatform] to use.
   ///
@@ -94,5 +98,56 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
   /// Clears the cached scan results.
   Future<bool> clearScanResults() {
     throw UnimplementedError('clearScanResults() has not been implemented.');
+  }
+
+  /// Establishes a GATT connection to [deviceId] using [config].
+  ///
+  /// Requires the background service to be running. Returns false when the
+  /// service is stopped, Bluetooth is off, or permissions are missing.
+  Future<bool> connect(String deviceId, ConnectConfig config) {
+    throw UnimplementedError('connect() has not been implemented.');
+  }
+
+  /// Cancels the GATT connection to [deviceId].
+  Future<bool> disconnect(String deviceId, DisconnectConfig config) {
+    throw UnimplementedError('disconnect() has not been implemented.');
+  }
+
+  /// Returns the cached connection state for [deviceId].
+  Future<BleConnectionState> getConnectionState(String deviceId) {
+    throw UnimplementedError('getConnectionState() has not been implemented.');
+  }
+
+  /// Device ids currently in the [BleConnectionState.connected] state.
+  Future<List<String>> getConnectedDevices() {
+    throw UnimplementedError('getConnectedDevices() has not been implemented.');
+  }
+
+  /// Stream of connection state changes for all devices.
+  Stream<BleConnectionEvent> get connectionState {
+    throw UnimplementedError('connectionState has not been implemented.');
+  }
+
+  /// Requests a larger ATT MTU (Android only).
+  Future<int> requestMtu(String deviceId, int mtu) {
+    throw UnimplementedError('requestMtu() has not been implemented.');
+  }
+
+  /// Updates connection priority (Android only).
+  Future<void> requestConnectionPriority(
+    String deviceId,
+    ConnectionPriority priority,
+  ) {
+    throw UnimplementedError(
+        'requestConnectionPriority() has not been implemented.');
+  }
+
+  /// Discovers GATT services on a connected [deviceId].
+  Future<List<BleGattService>> discoverServices(
+    String deviceId, {
+    Duration timeout = const Duration(seconds: 15),
+    bool subscribeToServicesChanged = true,
+  }) {
+    throw UnimplementedError('discoverServices() has not been implemented.');
   }
 }

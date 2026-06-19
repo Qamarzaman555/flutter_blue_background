@@ -31,12 +31,10 @@ class MockFlutterBlueBackgroundPlatform
   Future<bool> isServiceRunning() => Future.value(running);
 
   @override
-  Future<BleAdapterState> getAdapterState() =>
-      Future.value(BleAdapterState.on);
+  Future<BleAdapterState> getAdapterState() => Future.value(BleAdapterState.on);
 
   @override
-  Stream<BleAdapterState> get adapterState =>
-      Stream.value(BleAdapterState.on);
+  Stream<BleAdapterState> get adapterState => Stream.value(BleAdapterState.on);
 
   bool scanning = false;
 
@@ -63,10 +61,58 @@ class MockFlutterBlueBackgroundPlatform
 
   @override
   Future<bool> clearScanResults() => Future.value(true);
+
+  final Map<String, BleConnectionState> connections = {};
+
+  @override
+  Future<bool> connect(String deviceId, ConnectConfig config) {
+    connections[deviceId] = BleConnectionState.connected;
+    return Future.value(true);
+  }
+
+  @override
+  Future<bool> disconnect(String deviceId, DisconnectConfig config) {
+    connections[deviceId] = BleConnectionState.disconnected;
+    return Future.value(true);
+  }
+
+  @override
+  Future<BleConnectionState> getConnectionState(String deviceId) =>
+      Future.value(connections[deviceId] ?? BleConnectionState.disconnected);
+
+  @override
+  Future<List<String>> getConnectedDevices() => Future.value(
+        connections.entries
+            .where((e) => e.value == BleConnectionState.connected)
+            .map((e) => e.key)
+            .toList(),
+      );
+
+  @override
+  Stream<BleConnectionEvent> get connectionState => const Stream.empty();
+
+  @override
+  Future<int> requestMtu(String deviceId, int mtu) => Future.value(mtu);
+
+  @override
+  Future<void> requestConnectionPriority(
+    String deviceId,
+    ConnectionPriority priority,
+  ) =>
+      Future.value();
+
+  @override
+  Future<List<BleGattService>> discoverServices(
+    String deviceId, {
+    Duration timeout = const Duration(seconds: 15),
+    bool subscribeToServicesChanged = true,
+  }) =>
+      Future.value(const []);
 }
 
 void main() {
-  final FlutterBlueBackgroundPlatform initialPlatform = FlutterBlueBackgroundPlatform.instance;
+  final FlutterBlueBackgroundPlatform initialPlatform =
+      FlutterBlueBackgroundPlatform.instance;
 
   test('$MethodChannelFlutterBlueBackground is the default instance', () {
     expect(initialPlatform, isInstanceOf<MethodChannelFlutterBlueBackground>());
@@ -74,7 +120,8 @@ void main() {
 
   test('getPlatformVersion', () async {
     FlutterBlueBackground flutterBlueBackgroundPlugin = FlutterBlueBackground();
-    MockFlutterBlueBackgroundPlatform fakePlatform = MockFlutterBlueBackgroundPlatform();
+    MockFlutterBlueBackgroundPlatform fakePlatform =
+        MockFlutterBlueBackgroundPlatform();
     FlutterBlueBackgroundPlatform.instance = fakePlatform;
 
     expect(await flutterBlueBackgroundPlugin.getPlatformVersion(), '42');
@@ -82,7 +129,8 @@ void main() {
 
   test('start/stop service updates running state', () async {
     FlutterBlueBackground flutterBlueBackgroundPlugin = FlutterBlueBackground();
-    MockFlutterBlueBackgroundPlatform fakePlatform = MockFlutterBlueBackgroundPlatform();
+    MockFlutterBlueBackgroundPlatform fakePlatform =
+        MockFlutterBlueBackgroundPlatform();
     FlutterBlueBackgroundPlatform.instance = fakePlatform;
 
     expect(await flutterBlueBackgroundPlugin.isServiceRunning(), false);

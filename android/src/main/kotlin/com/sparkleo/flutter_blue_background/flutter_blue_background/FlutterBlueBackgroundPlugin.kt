@@ -17,6 +17,7 @@ class FlutterBlueBackgroundPlugin :
     private lateinit var channel: MethodChannel
     private lateinit var scanResultsChannel: EventChannel
     private lateinit var adapterStateChannel: EventChannel
+    private lateinit var connectionStateChannel: EventChannel
     private lateinit var context: Context
     private var adapterStateStreamHandler: BleAdapterStateStreamHandler? = null
 
@@ -46,6 +47,20 @@ class FlutterBlueBackgroundPlugin :
             "flutter_blue_background/adapter_state",
         )
         adapterStateChannel.setStreamHandler(adapterStateStreamHandler)
+
+        connectionStateChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_blue_background/connection_state",
+        )
+        connectionStateChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                ConnectionStateDispatcher.setSink(events)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                ConnectionStateDispatcher.setSink(null)
+            }
+        })
     }
 
     override fun onMethodCall(
@@ -108,6 +123,92 @@ class FlutterBlueBackgroundPlugin :
                 ScanResultDispatcher.clearCache()
                 result.success(true)
             }
+            "connect" -> {
+                if (!FlutterBlueBackgroundService.isRunning) {
+                    result.success(false)
+                    return
+                }
+                if (!BleAdapterState.isReady(context)) {
+                    result.success(false)
+                    return
+                }
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as? Map<String, Any?> ?: emptyMap()
+                val deviceId = args["deviceId"] as? String
+                @Suppress("UNCHECKED_CAST")
+                val config = args["config"] as? Map<String, Any?> ?: emptyMap()
+                if (deviceId.isNullOrEmpty()) {
+                    result.success(false)
+                    return
+                }
+                val json = ScanConfigCodec.encode(config)
+                startConnectService(deviceId, json, null)
+                result.success(true)
+            }
+            "disconnect" -> {
+                val deviceId = call.argument<String>("deviceId")
+                @Suppress("UNCHECKED_CAST")
+                val config = call.argument<Map<String, Any?>>("config") ?: emptyMap()
+                if (deviceId.isNullOrEmpty()) {
+                    result.success(false)
+                    return
+                }
+                if (FlutterBlueBackgroundService.isRunning) {
+                    val json = ScanConfigCodec.encode(config)
+                    startConnectService(deviceId, null, json)
+                } else {
+                    BleConnectorHolder.connector?.disconnect(deviceId, config)
+                }
+                result.success(true)
+            }
+            "getConnectionState" -> {
+                val deviceId = call.argument<String>("deviceId")
+                if (deviceId.isNullOrEmpty()) {
+                    result.success("disconnected")
+                    return
+                }
+                val state = BleConnectorHolder.connector?.getConnectionState(deviceId)
+                    ?: ConnectionStateDispatcher.getState(deviceId)
+                result.success(state)
+            }
+            "getConnectedDevices" -> {
+                val devices = BleConnectorHolder.connector?.getConnectedDeviceIds()
+                    ?: ConnectionStateDispatcher.getConnectedDeviceIds()
+                result.success(devices)
+            }
+            "requestMtu" -> {
+                val deviceId = call.argument<String>("deviceId")
+                val mtu = call.argument<Int>("mtu") ?: 512
+                if (deviceId.isNullOrEmpty() || !BleAdapterState.isReady(context)) {
+                    result.success(23)
+                    return
+                }
+                val negotiated = BleConnectorHolder.connector?.requestMtu(deviceId, mtu) ?: 23
+                result.success(negotiated)
+            }
+            "requestConnectionPriority" -> {
+                val deviceId = call.argument<String>("deviceId")
+                val priority = call.argument<Int>("priority") ?: 0
+                if (!deviceId.isNullOrEmpty()) {
+                    BleConnectorHolder.connector?.requestConnectionPriority(deviceId, priority)
+                }
+                result.success(null)
+            }
+            "discoverServices" -> {
+                val deviceId = call.argument<String>("deviceId")
+                val timeoutMillis = call.argument<Int>("timeoutMillis")?.toLong() ?: 15_000L
+                val subscribe = call.argument<Boolean>("subscribeToServicesChanged") ?: true
+                if (deviceId.isNullOrEmpty() || !BleAdapterState.isReady(context)) {
+                    result.success(emptyList<Any>())
+                    return
+                }
+                val services = BleConnectorHolder.connector?.discoverServices(
+                    deviceId,
+                    timeoutMillis,
+                    subscribe,
+                ) ?: emptyList()
+                result.success(services)
+            }
             else -> result.notImplemented()
         }
     }
@@ -140,6 +241,33 @@ class FlutterBlueBackgroundPlugin :
         }
     }
 
+    private fun startConnectService(
+        deviceId: String,
+        connectConfigJson: String?,
+        disconnectConfigJson: String?,
+    ) {
+        val action = if (disconnectConfigJson != null) {
+            FlutterBlueBackgroundService.ACTION_DISCONNECT
+        } else {
+            FlutterBlueBackgroundService.ACTION_CONNECT
+        }
+        val serviceIntent = Intent(context, FlutterBlueBackgroundService::class.java).apply {
+            this.action = action
+            putExtra(FlutterBlueBackgroundService.EXTRA_DEVICE_ID, deviceId)
+            connectConfigJson?.let {
+                putExtra(FlutterBlueBackgroundService.EXTRA_CONNECT_CONFIG, it)
+            }
+            disconnectConfigJson?.let {
+                putExtra(FlutterBlueBackgroundService.EXTRA_DISCONNECT_CONFIG, it)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
+    }
+
     private fun stopService() {
         FlutterBlueBackgroundService.markStopRequested()
         context.stopService(Intent(context, FlutterBlueBackgroundService::class.java))
@@ -149,7 +277,9 @@ class FlutterBlueBackgroundPlugin :
         channel.setMethodCallHandler(null)
         scanResultsChannel.setStreamHandler(null)
         adapterStateChannel.setStreamHandler(null)
+        connectionStateChannel.setStreamHandler(null)
         adapterStateStreamHandler = null
         ScanResultDispatcher.setSink(null)
+        ConnectionStateDispatcher.setSink(null)
     }
 }

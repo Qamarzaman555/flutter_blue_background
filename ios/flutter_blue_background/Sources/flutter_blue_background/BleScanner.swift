@@ -28,9 +28,15 @@ class BleScanner: NSObject {
 
     private(set) var isScanning = false
 
+    /// Forwards central-manager connection callbacks to the connector.
+    weak var connector: BleConnector?
+
     // Latest advertisement per deviceId; preserves discovery order.
     private var cache: [String: [String: Any]] = [:]
     private var cacheOrder: [String] = []
+
+    /// Retained peripheral handles keyed by deviceId for subsequent connections.
+    private var peripheralCache: [String: CBPeripheral] = [:]
 
     // Pending scan parameters, applied once the central manager powers on.
     private var pendingServiceUuids: [CBUUID]?
@@ -146,6 +152,10 @@ class BleScanner: NSObject {
         mapAdapterState(centralManager.state)
     }
 
+    func isAdapterReady() -> Bool {
+        centralManager.state == .poweredOn
+    }
+
     private func emitAdapterState() {
         adapterStateSink?(mapAdapterState(centralManager.state))
     }
@@ -177,6 +187,19 @@ class BleScanner: NSObject {
     func clearCache() {
         cache.removeAll()
         cacheOrder.removeAll()
+    }
+
+    /// Returns a retained `CBPeripheral` for [deviceId], if discovered or retrieved.
+    func peripheral(for deviceId: String) -> CBPeripheral? {
+        if let cached = peripheralCache[deviceId] {
+            return cached
+        }
+        guard let uuid = UUID(uuidString: deviceId) else { return nil }
+        return centralManager.retrievePeripherals(withIdentifiers: [uuid]).first
+    }
+
+    var sharedCentralManager: CBCentralManager {
+        centralManager
     }
 
     // MARK: - Internal
@@ -245,6 +268,7 @@ extension BleScanner: CBCentralManagerDelegate {
             if central.isScanning {
                 central.stopScan()
             }
+            connector?.onBluetoothAdapterOff()
         }
     }
 
@@ -316,7 +340,28 @@ extension BleScanner: CBCentralManagerDelegate {
         }
 
         cacheResult(peripheral.identifier.uuidString, payload)
+        peripheralCache[peripheral.identifier.uuidString] = peripheral
         eventSink?(payload)
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connector?.handleDidConnect(peripheral)
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didFailToConnect peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        connector?.handleDidFailToConnect(peripheral, error: error)
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        connector?.handleDidDisconnect(peripheral, error: error)
     }
 }
 
