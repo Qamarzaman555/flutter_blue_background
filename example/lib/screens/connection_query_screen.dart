@@ -53,7 +53,7 @@ class _ConnectionQueryScreenState extends State<ConnectionQueryScreen> {
                 ),
                 const SizedBox(height: 8),
                 Obx(() {
-                  final ids = controller.queriedConnectedDeviceIds;
+                  final ids = controller.queriedConnectedDeviceIds.toList();
                   if (ids.isEmpty) return const SizedBox.shrink();
                   return Card(
                     child: Padding(
@@ -119,12 +119,16 @@ class _ConnectionQueryScreenState extends State<ConnectionQueryScreen> {
                 ),
                 const SizedBox(height: 4),
                 Obx(() {
+                  // Touch RxMaps/RxLists so GetX registers dependencies.
                   final deviceIds = <String>{
                     ...controller.devices.keys,
                     ...controller.connectionStates.keys,
                     ...controller.queriedConnectedDeviceIds,
                   }.toList()
                     ..sort();
+                  final connectionStates = controller.connectionStates;
+                  final queriedStates = controller.queriedConnectionStates;
+                  final gattServices = controller.discoveredServices;
 
                   if (deviceIds.isEmpty) {
                     return const Text('Scan or connect first');
@@ -132,13 +136,10 @@ class _ConnectionQueryScreenState extends State<ConnectionQueryScreen> {
 
                   return Column(
                     children: deviceIds.map((deviceId) {
-                      final streamState =
-                          controller.connectionStates[deviceId] ??
-                              BleConnectionState.disconnected;
-                      final polled =
-                          controller.queriedConnectionStates[deviceId];
-                      final gatt =
-                          controller.discoveredServices[deviceId]?.length;
+                      final streamState = connectionStates[deviceId] ??
+                          BleConnectionState.disconnected;
+                      final polled = queriedStates[deviceId];
+                      final gatt = gattServices[deviceId]?.length;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
@@ -194,15 +195,24 @@ class _ConnectionQueryScreenState extends State<ConnectionQueryScreen> {
                     ),
                   ],
                 ),
-                Obx(
-                  () => Card(
+                Obx(() {
+                  final entries = controller.connectionEventLog.toList();
+                  if (entries.isEmpty) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No connection events yet'),
+                      ),
+                    );
+                  }
+                  return Card(
                     child: BleEventLogList(
                       adapterEntries: const [],
-                      connectionEntries: controller.connectionEventLog,
+                      connectionEntries: entries,
                       showAdapter: false,
                     ),
-                  ),
-                ),
+                  );
+                }),
               ],
             ),
           ),

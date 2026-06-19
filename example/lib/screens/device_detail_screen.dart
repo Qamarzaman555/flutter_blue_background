@@ -23,18 +23,19 @@ class DeviceDetailScreen extends StatelessWidget {
         title: Text(controller.displayNameFor(deviceId)),
       ),
       body: Obx(() {
-        final connectionState =
-            controller.connectionStates[deviceId] ??
-                BleConnectionState.disconnected;
+        final connectionState = controller.connectionStates[deviceId] ??
+            BleConnectionState.disconnected;
         final mtu = controller.deviceMtu[deviceId];
         final services = controller.discoveredServices[deviceId] ?? const [];
-        final discovering =
-            controller.isDiscoveringServices[deviceId] ?? false;
-        final isConnected =
-            connectionState == BleConnectionState.connected;
+        final discovering = controller.isDiscoveringServices[deviceId] ?? false;
+        final isConnected = connectionState == BleConnectionState.connected;
 
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.only(
+              top: 16,
+              right: 16,
+              left: 16,
+              bottom: MediaQuery.of(context).padding.bottom + 16),
           children: [
             _Section(
               title: 'Connection',
@@ -81,7 +82,8 @@ class DeviceDetailScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _InfoRow('displayName', device.displayName),
-                    _InfoRow('advName', device.advName.isEmpty ? '—' : device.advName),
+                    _InfoRow('advName',
+                        device.advName.isEmpty ? '—' : device.advName),
                     _InfoRow(
                       'platformName',
                       device.platformName.isEmpty ? '—' : device.platformName,
@@ -121,9 +123,7 @@ class DeviceDetailScreen extends StatelessWidget {
                         ? null
                         : () => controller.discoverServicesFor(deviceId),
                     child: Text(
-                      discovering
-                          ? 'Discovering…'
-                          : 'discoverServices()',
+                      discovering ? 'Discovering…' : 'discoverServices()',
                     ),
                   ),
                   if (Platform.isAndroid) ...[

@@ -92,6 +92,7 @@ class BleController extends GetxController {
     if (adapterStateLog.length > _maxLogEntries) {
       adapterStateLog.removeRange(_maxLogEntries, adapterStateLog.length);
     }
+    adapterStateLog.refresh();
   }
 
   void _logConnectionEvent(BleConnectionEvent event) {
@@ -102,6 +103,7 @@ class BleController extends GetxController {
     if (connectionEventLog.length > _maxLogEntries) {
       connectionEventLog.removeRange(_maxLogEntries, connectionEventLog.length);
     }
+    connectionEventLog.refresh();
   }
 
   Future<void> _onAdapterStreamEvent(BleAdapterState state) async {
@@ -274,6 +276,8 @@ class BleController extends GetxController {
   void clearLogs() {
     adapterStateLog.clear();
     connectionEventLog.clear();
+    adapterStateLog.refresh();
+    connectionEventLog.refresh();
     _logAdapterState(adapterState.value, source: 'stream');
   }
 

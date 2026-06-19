@@ -103,7 +103,7 @@ class AdapterScreen extends StatelessWidget {
           ),
           Card(
             child: BleEventLogList(
-              adapterEntries: controller.adapterStateLog,
+              adapterEntries: controller.adapterStateLog.toList(),
               connectionEntries: const [],
               showConnection: false,
             ),
