@@ -165,20 +165,24 @@ class DeviceDetailScreen extends StatelessWidget {
                     services: services,
                     isLoading: discovering,
                     characteristicValueHex: Map<String, String>.fromEntries(
-                      controller.characteristicValueHex.entries.where(
-                        (e) => e.key.startsWith('$deviceId|'),
-                      ).map(
-                        (e) => MapEntry(
-                            e.key.substring(deviceId.length + 1), e.value),
-                      ),
+                      controller.characteristicValueHex.entries
+                          .where(
+                            (e) => e.key.startsWith('$deviceId|'),
+                          )
+                          .map(
+                            (e) => MapEntry(
+                                e.key.substring(deviceId.length + 1), e.value),
+                          ),
                     ),
                     characteristicValueText: Map<String, String>.fromEntries(
-                      controller.characteristicValueText.entries.where(
-                        (e) => e.key.startsWith('$deviceId|'),
-                      ).map(
-                        (e) => MapEntry(
-                            e.key.substring(deviceId.length + 1), e.value),
-                      ),
+                      controller.characteristicValueText.entries
+                          .where(
+                            (e) => e.key.startsWith('$deviceId|'),
+                          )
+                          .map(
+                            (e) => MapEntry(
+                                e.key.substring(deviceId.length + 1), e.value),
+                          ),
                     ),
                     notifyingKeys: controller.notifyingCharacteristics
                         .where((k) => k.startsWith('$deviceId|'))
@@ -189,8 +193,8 @@ class DeviceDetailScreen extends StatelessWidget {
                             .readCharacteristicFor(deviceId, serviceUuid, char)
                         : null,
                     onWrite: isConnected
-                        ? (serviceUuid, char) =>
-                            _promptWrite(context, controller, deviceId, serviceUuid, char)
+                        ? (serviceUuid, char) => _promptWrite(
+                            context, controller, deviceId, serviceUuid, char)
                         : null,
                     onToggleNotify: isConnected
                         ? (serviceUuid, char) => controller.toggleNotifyFor(

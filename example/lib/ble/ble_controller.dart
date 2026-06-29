@@ -660,8 +660,7 @@ class BleController extends GetxController {
         hex: _formatBytes(value),
         source: 'read',
       );
-      gattStatusMessage.value =
-          'readCharacteristic(): ${bytesToString(value)}';
+      gattStatusMessage.value = 'readCharacteristic(): ${bytesToString(value)}';
     } on FbbException catch (e) {
       gattStatusMessage.value = 'readCharacteristic() failed: $e';
     } catch (e) {

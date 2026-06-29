@@ -44,7 +44,8 @@ class GattExchangeLog extends StatelessWidget {
           leading: Icon(icon, color: color, size: 18),
           title: Text(
             entry.isSent ? 'Sent' : 'Received',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color),
+            style:
+                Theme.of(context).textTheme.labelLarge?.copyWith(color: color),
           ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
