@@ -1,6 +1,7 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_blue_background_method_channel.dart';
+import 'src/fbb_log_level.dart';
 import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_connection_state.dart';
 import 'src/models/ble_gatt_service.dart';
@@ -32,6 +33,11 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
 
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  /// Sets the plugin log verbosity on Dart and native layers.
+  Future<void> setLogLevel(FbbLogLevel level) {
+    throw UnimplementedError('setLogLevel() has not been implemented.');
   }
 
   /// Starts the native background (foreground) service.

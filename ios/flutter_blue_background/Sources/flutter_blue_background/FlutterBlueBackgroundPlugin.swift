@@ -35,7 +35,13 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    FbbLog.debug("onMethodCall: \(call.method)")
     switch call.method {
+    case "setLogLevel":
+      let idx = call.arguments as? Int ?? FbbLogLevel.debug.rawValue
+      FbbLog.setLevel(idx)
+      result(nil)
+
     case "getPlatformVersion":
       result("iOS " + UIDevice.current.systemVersion)
 

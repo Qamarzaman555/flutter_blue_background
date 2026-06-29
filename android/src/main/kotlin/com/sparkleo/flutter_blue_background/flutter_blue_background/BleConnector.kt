@@ -1,6 +1,5 @@
 package com.sparkleo.flutter_blue_background.flutter_blue_background
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -11,12 +10,9 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
-import androidx.core.content.ContextCompat
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -30,8 +26,6 @@ import java.util.concurrent.atomic.AtomicReference
 class BleConnector(private val context: Context) {
 
     companion object {
-        private const val TAG = "BleConnector"
-
         /** GAP service and Services Changed characteristic. */
         private val GAP_SERVICE_UUID = java.util.UUID.fromString(
             "00001801-0000-1000-8000-00805f9b34fb",
@@ -59,14 +53,14 @@ class BleConnector(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(deviceId: String, config: Map<String, Any?>): Boolean {
-        if (!hasConnectPermission()) {
-            Log.w(TAG, "Missing BLUETOOTH_CONNECT permission")
+        if (!BlePermissions.hasConnectPermission(context)) {
+            FbbLog.warning("Missing BLUETOOTH_CONNECT permission")
             emitState(deviceId, "disconnected", errorMessage = "Missing Bluetooth permission")
             return false
         }
 
         if (!BleAdapterState.isReady(context)) {
-            Log.w(TAG, "Bluetooth adapter not ready")
+            FbbLog.warning("Bluetooth adapter not ready")
             emitState(deviceId, "disconnected", errorMessage = "Bluetooth adapter is not ready")
             return false
         }
@@ -81,7 +75,7 @@ class BleConnector(private val context: Context) {
         if (existing?.gatt != null &&
             ConnectionStateDispatcher.getState(deviceId) == "connected"
         ) {
-            Log.d(TAG, "Already connected to $deviceId")
+            FbbLog.debug("Already connected to $deviceId")
             return true
         }
 
@@ -98,6 +92,7 @@ class BleConnector(private val context: Context) {
         sessions[deviceId] = session
 
         emitState(deviceId, "connecting", mtu = session.mtu)
+        FbbLog.debug("connect: $deviceId autoConnect=$autoConnect transport=$transport")
 
         val device = runCatching { adapter.getRemoteDevice(deviceId) }.getOrNull()
         if (device == null) {
@@ -116,7 +111,7 @@ class BleConnector(private val context: Context) {
                 device.connectGatt(context, autoConnect, callback)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "connectGatt failed: ${e.message}")
+            FbbLog.error("connectGatt failed: ${e.message}")
             emitState(deviceId, "disconnected", errorMessage = e.message)
             sessions.remove(deviceId)
             return false
@@ -130,7 +125,7 @@ class BleConnector(private val context: Context) {
                 ?: 35_000L
             val runnable = Runnable {
                 if (ConnectionStateDispatcher.getState(deviceId) != "connected") {
-                    Log.w(TAG, "Connection timeout for $deviceId")
+                    FbbLog.warning("Connection timeout for $deviceId")
                     disconnectInternal(deviceId, androidDelayMillis = 0, waitMs = 0)
                     emitState(
                         deviceId,
@@ -148,6 +143,7 @@ class BleConnector(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun disconnect(deviceId: String, config: Map<String, Any?>): Boolean {
+        FbbLog.debug("disconnect: $deviceId")
         val androidDelay = (config["androidDelayMillis"] as? Number)?.toLong() ?: 2000L
         val waitMs = (config["timeoutMillis"] as? Number)?.toLong() ?: 35_000L
         disconnectInternal(deviceId, androidDelay, waitMs)
@@ -164,7 +160,7 @@ class BleConnector(private val context: Context) {
     fun requestMtu(deviceId: String, mtu: Int): Int {
         val session = sessions[deviceId] ?: return 23
         val gatt = session.gatt ?: return session.mtu
-        if (!hasConnectPermission()) return session.mtu
+        if (!BlePermissions.hasConnectPermission(context)) return session.mtu
 
         val latch = CountDownLatch(1)
         session.pendingMtuLatch = latch
@@ -185,7 +181,7 @@ class BleConnector(private val context: Context) {
     fun requestConnectionPriority(deviceId: String, priority: Int): Boolean {
         val session = sessions[deviceId] ?: return false
         val gatt = session.gatt ?: return false
-        if (!hasConnectPermission()) return false
+        if (!BlePermissions.hasConnectPermission(context)) return false
 
         val nativePriority = when (priority) {
             1 -> BluetoothGatt.CONNECTION_PRIORITY_HIGH
@@ -204,7 +200,7 @@ class BleConnector(private val context: Context) {
         val session = sessions[deviceId] ?: return null
         val gatt = session.gatt ?: return null
         if (ConnectionStateDispatcher.getState(deviceId) != "connected") return null
-        if (!hasConnectPermission()) return null
+        if (!BlePermissions.hasConnectPermission(context)) return null
 
         session.config = (session.config ?: emptyMap()).toMutableMap().apply {
             put("subscribeToServicesChanged", subscribeToServicesChanged)
@@ -243,7 +239,7 @@ class BleConnector(private val context: Context) {
             session.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
             session.gatt?.let { gatt ->
                 runCatching {
-                    if (hasConnectPermission()) {
+                    if (BlePermissions.hasConnectPermission(context)) {
                         gatt.disconnect()
                     }
                     gatt.close()
@@ -280,7 +276,7 @@ class BleConnector(private val context: Context) {
         val delay = (androidDelayMillis - elapsed).coerceAtLeast(0)
         mainHandler.postDelayed({
             emitState(deviceId, "disconnecting", mtu = session.mtu)
-            if (hasConnectPermission()) {
+            if (BlePermissions.hasConnectPermission(context)) {
                 runCatching { gatt.disconnect() }
                 runCatching { gatt.close() }
             }
@@ -299,6 +295,9 @@ class BleConnector(private val context: Context) {
                 newState: Int,
             ) {
                 val session = sessions[deviceId] ?: return
+                FbbLog.debug(
+                    "onConnectionStateChange: $deviceId state=$newState status=$status",
+                )
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
                         session.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -309,7 +308,7 @@ class BleConnector(private val context: Context) {
                         val config = session.config ?: emptyMap()
                         val android = config["android"] as? Map<String, Any?> ?: emptyMap()
 
-                        if (!hasConnectPermission()) return
+                        if (!BlePermissions.hasConnectPermission(context)) return
 
                         val priority = (android["connectionPriority"] as? Number)?.toInt() ?: 0
                         requestConnectionPriority(deviceId, priority)
@@ -347,6 +346,7 @@ class BleConnector(private val context: Context) {
 
             override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
                 val session = sessions[deviceId] ?: return
+                FbbLog.debug("onMtuChanged: $deviceId mtu=$mtu status=$status")
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     session.mtu = mtu
                     emitState(deviceId, "connected", mtu = mtu)
@@ -364,6 +364,10 @@ class BleConnector(private val context: Context) {
 
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                 val session = sessions[deviceId] ?: return
+                val count = if (status == BluetoothGatt.GATT_SUCCESS) gatt.services.size else 0
+                FbbLog.debug(
+                    "onServicesDiscovered: $deviceId count=$count status=$status",
+                )
                 val services = if (status == BluetoothGatt.GATT_SUCCESS) {
                     mapServices(gatt)
                 } else {
@@ -381,7 +385,8 @@ class BleConnector(private val context: Context) {
             }
 
             override fun onServiceChanged(gatt: BluetoothGatt) {
-                if (!hasConnectPermission()) return
+                FbbLog.info("onServiceChanged: ${gatt.device.address}")
+                if (!BlePermissions.hasConnectPermission(context)) return
                 gatt.discoverServices()
             }
         }
@@ -454,14 +459,6 @@ class BleConnector(private val context: Context) {
         val manager =
             context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         return manager?.adapter
-    }
-
-    private fun hasConnectPermission(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.BLUETOOTH_CONNECT,
-        ) == PackageManager.PERMISSION_GRANTED
     }
 }
 

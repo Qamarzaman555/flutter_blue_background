@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:flutter_blue_background/flutter_blue_background_platform_interface.dart';
 import 'package:flutter_blue_background/flutter_blue_background_method_channel.dart';
+import 'package:flutter_blue_background/src/fbb_log_level.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockFlutterBlueBackgroundPlatform
@@ -11,6 +12,9 @@ class MockFlutterBlueBackgroundPlatform
 
   @override
   Future<String?> getPlatformVersion() => Future.value('42');
+
+  @override
+  Future<void> setLogLevel(FbbLogLevel level) => Future.value();
 
   @override
   Future<bool> startService({

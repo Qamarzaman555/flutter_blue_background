@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import AVFoundation
-import os.log
 
 /// BackgroundService - keeps the app alive in the background.
 ///
@@ -15,8 +14,6 @@ class BackgroundService: NSObject {
 
     static let shared = BackgroundService()
 
-    private let log = OSLog(subsystem: "com.sparkleo.flutter_blue_background", category: "BackgroundService")
-
     private var isRunning = false
     private var audioPlayer: AVAudioPlayer?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -28,19 +25,19 @@ class BackgroundService: NSObject {
     /// Start the background service.
     func start() {
         guard !isRunning else {
-            os_log("BackgroundService already running", log: log, type: .info)
+            FbbLog.info("BackgroundService already running")
             return
         }
 
         isRunning = true
-        os_log("Starting BackgroundService", log: log, type: .info)
+        FbbLog.info("Starting BackgroundService")
 
         setupBackgroundTaskHandling()
 
         // Optional: uncomment to enable silent audio keep-alive (see warning below).
         // setupSilentAudio()
 
-        os_log("BackgroundService started", log: log, type: .info)
+        FbbLog.info("BackgroundService started")
     }
 
     /// Stop the background service.
@@ -48,13 +45,13 @@ class BackgroundService: NSObject {
         guard isRunning else { return }
 
         isRunning = false
-        os_log("Stopping BackgroundService", log: log, type: .info)
+        FbbLog.info("Stopping BackgroundService")
 
         NotificationCenter.default.removeObserver(self)
         stopSilentAudio()
         endBackgroundTask()
 
-        os_log("BackgroundService stopped", log: log, type: .info)
+        FbbLog.info("BackgroundService stopped")
     }
 
     // MARK: - Background Task Handling
@@ -76,12 +73,12 @@ class BackgroundService: NSObject {
     }
 
     @objc private func appDidEnterBackground() {
-        os_log("Entered background", log: log, type: .info)
+        FbbLog.info("Entered background")
         startBackgroundTask()
     }
 
     @objc private func appWillEnterForeground() {
-        os_log("Entering foreground", log: log, type: .info)
+        FbbLog.info("Entering foreground")
         endBackgroundTask()
     }
 
@@ -90,7 +87,7 @@ class BackgroundService: NSObject {
 
         backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
             guard let self = self else { return }
-            os_log("Background task expiring", log: self.log, type: .info)
+            FbbLog.info("Background task expiring")
             self.endBackgroundTask()
         }
     }
@@ -116,7 +113,7 @@ class BackgroundService: NSObject {
             try audioSession.setActive(true)
 
             guard let soundURL = Bundle.main.url(forResource: "silence", withExtension: "mp3") else {
-                os_log("Silent audio file not found", log: log, type: .error)
+                FbbLog.error("Silent audio file not found")
                 return
             }
 
@@ -125,9 +122,9 @@ class BackgroundService: NSObject {
             audioPlayer?.volume = 0.01 // Very low volume
             audioPlayer?.play()
 
-            os_log("Silent audio started", log: log, type: .info)
+            FbbLog.info("Silent audio started")
         } catch {
-            os_log("Failed to setup silent audio: %{public}@", log: log, type: .error, error.localizedDescription)
+            FbbLog.error("Failed to setup silent audio: \(error.localizedDescription)")
         }
     }
 

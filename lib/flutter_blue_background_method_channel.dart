@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/fbb_log_level.dart';
+import 'src/fbb_logger.dart';
 import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_connection_state.dart';
 import 'src/models/ble_gatt_service.dart';
@@ -34,12 +36,21 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   Stream<BleAdapterState>? _adapterState;
   Stream<BleConnectionEvent>? _connectionState;
 
+  Future<T?> _invokeMethod<T>(String method, [dynamic arguments]) async {
+    FbbLogger.logMethodArgs(method, arguments);
+    final result = await methodChannel.invokeMethod<T>(method, arguments);
+    FbbLogger.logMethodResult(method, result);
+    return result;
+  }
+
+  @override
+  Future<void> setLogLevel(FbbLogLevel level) async {
+    await _invokeMethod<void>('setLogLevel', level.index);
+  }
+
   @override
   Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>(
-      'getPlatformVersion',
-    );
-    return version;
+    return _invokeMethod<String>('getPlatformVersion');
   }
 
   @override
@@ -47,7 +58,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
     String? notificationTitle,
     String? notificationContent,
   }) async {
-    final started = await methodChannel.invokeMethod<bool>('startService', {
+    final started = await _invokeMethod<bool>('startService', {
       'notificationTitle': notificationTitle,
       'notificationContent': notificationContent,
     });
@@ -56,19 +67,19 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<bool> stopService() async {
-    final stopped = await methodChannel.invokeMethod<bool>('stopService');
+    final stopped = await _invokeMethod<bool>('stopService');
     return stopped ?? false;
   }
 
   @override
   Future<bool> isServiceRunning() async {
-    final running = await methodChannel.invokeMethod<bool>('isServiceRunning');
+    final running = await _invokeMethod<bool>('isServiceRunning');
     return running ?? false;
   }
 
   @override
   Future<BleAdapterState> getAdapterState() async {
-    final state = await methodChannel.invokeMethod<String>('getAdapterState');
+    final state = await _invokeMethod<String>('getAdapterState');
     return BleAdapterState.fromNative(state);
   }
 
@@ -82,7 +93,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<bool> startScan(ScanConfig config) async {
-    final started = await methodChannel.invokeMethod<bool>(
+    final started = await _invokeMethod<bool>(
       'startScan',
       config.toMap(),
     );
@@ -91,13 +102,13 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<bool> stopScan() async {
-    final stopped = await methodChannel.invokeMethod<bool>('stopScan');
+    final stopped = await _invokeMethod<bool>('stopScan');
     return stopped ?? false;
   }
 
   @override
   Future<bool> isScanning() async {
-    final scanning = await methodChannel.invokeMethod<bool>('isScanning');
+    final scanning = await _invokeMethod<bool>('isScanning');
     return scanning ?? false;
   }
 
@@ -111,7 +122,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<List<BleScanResult>> getScanResults() async {
-    final results = await methodChannel.invokeMethod<List<dynamic>>(
+    final results = await _invokeMethod<List<dynamic>>(
       'getScanResults',
     );
     if (results == null) return const [];
@@ -122,13 +133,13 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<bool> clearScanResults() async {
-    final cleared = await methodChannel.invokeMethod<bool>('clearScanResults');
+    final cleared = await _invokeMethod<bool>('clearScanResults');
     return cleared ?? false;
   }
 
   @override
   Future<bool> connect(String deviceId, ConnectConfig config) async {
-    final connected = await methodChannel.invokeMethod<bool>('connect', {
+    final connected = await _invokeMethod<bool>('connect', {
       'deviceId': deviceId,
       'config': config.toMap(),
     });
@@ -137,7 +148,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<bool> disconnect(String deviceId, DisconnectConfig config) async {
-    final disconnected = await methodChannel.invokeMethod<bool>('disconnect', {
+    final disconnected = await _invokeMethod<bool>('disconnect', {
       'deviceId': deviceId,
       'config': config.toMap(),
     });
@@ -146,7 +157,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<BleConnectionState> getConnectionState(String deviceId) async {
-    final state = await methodChannel.invokeMethod<String>(
+    final state = await _invokeMethod<String>(
       'getConnectionState',
       {'deviceId': deviceId},
     );
@@ -155,7 +166,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<List<String>> getConnectedDevices() async {
-    final devices = await methodChannel.invokeMethod<List<dynamic>>(
+    final devices = await _invokeMethod<List<dynamic>>(
       'getConnectedDevices',
     );
     if (devices == null) return const [];
@@ -171,7 +182,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
 
   @override
   Future<int> requestMtu(String deviceId, int mtu) async {
-    final result = await methodChannel.invokeMethod<int>('requestMtu', {
+    final result = await _invokeMethod<int>('requestMtu', {
       'deviceId': deviceId,
       'mtu': mtu,
     });
@@ -183,7 +194,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
     String deviceId,
     ConnectionPriority priority,
   ) async {
-    await methodChannel.invokeMethod<void>('requestConnectionPriority', {
+    await _invokeMethod<void>('requestConnectionPriority', {
       'deviceId': deviceId,
       'priority': priority.nativeValue,
     });
@@ -195,7 +206,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
     Duration timeout = const Duration(seconds: 15),
     bool subscribeToServicesChanged = true,
   }) async {
-    final services = await methodChannel.invokeMethod<List<dynamic>>(
+    final services = await _invokeMethod<List<dynamic>>(
       'discoverServices',
       {
         'deviceId': deviceId,

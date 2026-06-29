@@ -17,7 +17,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
@@ -30,8 +29,6 @@ import androidx.core.app.NotificationCompat
 class FlutterBlueBackgroundService : Service() {
 
     companion object {
-        private const val TAG = "FlutterBlueBgService"
-
         const val CHANNEL_ID = "flutter_blue_background_channel"
         const val NOTIFICATION_ID = 4242
 
@@ -102,7 +99,7 @@ class FlutterBlueBackgroundService : Service() {
         createNotificationChannel()
         acquireWakeLock()
         registerAdapterStateReceiver()
-        Log.d(TAG, "Service created")
+        FbbLog.debug("Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -128,7 +125,13 @@ class FlutterBlueBackgroundService : Service() {
         handleScanCommand(intent, prefs)
         handleConnectCommand(intent)
 
-        Log.d(TAG, "Service started")
+        when (intent?.action) {
+            ACTION_START_SCAN -> FbbLog.debug("Scan start command")
+            ACTION_STOP_SCAN -> FbbLog.debug("Scan stop command")
+            ACTION_CONNECT -> FbbLog.debug("Connect command")
+            ACTION_DISCONNECT -> FbbLog.debug("Disconnect command")
+            else -> FbbLog.verbose("onStartCommand (notification/config update)")
+        }
         // START_STICKY so the system recreates the service if it is killed.
         return START_STICKY
     }
@@ -189,7 +192,7 @@ class FlutterBlueBackgroundService : Service() {
         if (timeoutMillis <= 0L) return
 
         val runnable = Runnable {
-            Log.d(TAG, "Scan timeout reached; stopping scan")
+            FbbLog.debug("Scan timeout reached; stopping scan")
             bleScanner.stopScan()
             // Clear the persisted scan so a later service restart does not resume
             // a scan whose timed window already elapsed.
@@ -252,7 +255,7 @@ class FlutterBlueBackgroundService : Service() {
      */
     private fun onBluetoothOff() {
         if (bleScanner.isScanning) {
-            Log.d(TAG, "Bluetooth turned off; stopping scan")
+            FbbLog.info("Bluetooth turned off; stopping scan")
             cancelScanTimeout()
             bleScanner.stopScan()
             ScanResultDispatcher.isScanning = false
@@ -264,7 +267,7 @@ class FlutterBlueBackgroundService : Service() {
         }
 
         if (::bleConnector.isInitialized) {
-            Log.d(TAG, "Bluetooth turned off; disconnecting GATT clients")
+            FbbLog.info("Bluetooth turned off; disconnecting GATT clients")
             bleConnector.onBluetoothAdapterOff()
             BleConnectorHolder.connector = bleConnector
         }
@@ -275,7 +278,7 @@ class FlutterBlueBackgroundService : Service() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 if (!BleAdapterState.isReady(applicationContext)) {
-                    Log.w(TAG, "Ignoring connect — Bluetooth adapter not ready")
+                    FbbLog.warning("Ignoring connect — Bluetooth adapter not ready")
                     return
                 }
                 val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID) ?: return
@@ -304,7 +307,7 @@ class FlutterBlueBackgroundService : Service() {
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "Service destroyed (stopRequested=$isStopRequested)")
+        FbbLog.debug("Service destroyed (stopRequested=$isStopRequested)")
         stopKeepAlive()
         cancelScanTimeout()
         unregisterAdapterStateReceiver()

@@ -1,7 +1,6 @@
 import CoreBluetooth
 import Flutter
 import Foundation
-import os.log
 
 /// Owns a `CBCentralManager` and translates a Dart `ScanConfig` map into a
 /// CoreBluetooth scan, emitting discovered peripherals onto a Flutter
@@ -19,8 +18,6 @@ import os.log
 class BleScanner: NSObject {
 
     private static let maxCacheSize = 256
-
-    private let log = OSLog(subsystem: "com.sparkleo.flutter_blue_background", category: "BleScanner")
 
     private var centralManager: CBCentralManager!
     private var eventSink: FlutterEventSink?
@@ -108,12 +105,13 @@ class BleScanner: NSObject {
         default:
             // Defer until the central manager powers on.
             hasPendingScan = true
-            os_log("Bluetooth not powered on yet; scan deferred", log: log, type: .info)
+            FbbLog.info("Bluetooth not powered on yet; scan deferred")
             return true
         }
     }
 
     func stopScan() -> Bool {
+        FbbLog.debug("stopScan")
         hasPendingScan = false
         cancelTimeoutTimer()
         if centralManager.isScanning {
@@ -223,7 +221,7 @@ class BleScanner: NSObject {
         isScanning = true
         hasPendingScan = false
         scheduleTimeoutTimer()
-        os_log("Scan started", log: log, type: .info)
+        FbbLog.debug("Scan started")
     }
 
     private func scheduleTimeoutTimer() {
@@ -238,7 +236,7 @@ class BleScanner: NSObject {
             if self.timeoutTimer === firedTimer {
                 self.timeoutTimer = nil
             }
-            os_log("Scan timeout reached; stopping scan", log: self.log, type: .info)
+            FbbLog.debug("Scan timeout reached; stopping scan")
             _ = self.stopScan()
         }
         // Add explicitly to the main run loop so it fires even if created off the
@@ -279,6 +277,7 @@ extension BleScanner: CBCentralManagerDelegate {
         rssi RSSI: NSNumber
     ) {
         let rssi = RSSI.intValue
+        FbbLog.verbose("didDiscover: \(peripheral.identifier.uuidString) rssi=\(rssi)")
 
         // Client-side RSSI threshold. 127 means "unknown" per CoreBluetooth.
         if let threshold = rssiThreshold, rssi != 127, rssi < threshold {

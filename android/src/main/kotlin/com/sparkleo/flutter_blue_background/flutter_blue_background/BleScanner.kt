@@ -1,6 +1,5 @@
 package com.sparkleo.flutter_blue_background.flutter_blue_background
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -10,11 +9,8 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
-import android.util.Log
-import androidx.core.content.ContextCompat
 
 /**
  * Owns the [BluetoothLeScanner] and translates a Dart `ScanConfig` map into
@@ -32,10 +28,6 @@ import androidx.core.content.ContextCompat
  */
 class BleScanner(private val context: Context) {
 
-    companion object {
-        private const val TAG = "BleScanner"
-    }
-
     private var scanner: BluetoothLeScanner? = null
     private var activeCallback: ScanCallback? = null
 
@@ -49,20 +41,20 @@ class BleScanner(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startScan(config: Map<String, Any?>): Boolean {
-        if (!hasScanPermission()) {
-            Log.w(TAG, "Missing BLUETOOTH_SCAN / location permission")
+        if (!BlePermissions.hasScanPermission(context)) {
+            FbbLog.warning("Missing BLUETOOTH_SCAN / location permission")
             return false
         }
 
         val adapter = bluetoothAdapter()
         if (adapter == null || !adapter.isEnabled) {
-            Log.w(TAG, "Bluetooth adapter unavailable or disabled")
+            FbbLog.warning("Bluetooth adapter unavailable or disabled")
             return false
         }
 
         val leScanner = adapter.bluetoothLeScanner
         if (leScanner == null) {
-            Log.w(TAG, "BluetoothLeScanner unavailable")
+            FbbLog.warning("BluetoothLeScanner unavailable")
             return false
         }
 
@@ -83,6 +75,7 @@ class BleScanner(private val context: Context) {
 
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
+                FbbLog.verbose("onScanResult: ${result.device.address} rssi=${result.rssi}")
                 handleResult(result)
             }
 
@@ -91,7 +84,7 @@ class BleScanner(private val context: Context) {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                Log.e(TAG, "Scan failed: $errorCode")
+                FbbLog.error("Scan failed: $errorCode")
                 ScanResultDispatcher.isScanning = false
                 ScanResultDispatcher.error(
                     "scan_failed",
@@ -105,16 +98,17 @@ class BleScanner(private val context: Context) {
             scanner = leScanner
             activeCallback = callback
             ScanResultDispatcher.isScanning = true
-            Log.d(TAG, "Scan started (filters=${filters.size})")
+            FbbLog.debug("Scan started (filters=${filters.size})")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "startScan threw: ${e.message}")
+            FbbLog.error("startScan threw: ${e.message}")
             false
         }
     }
 
     @SuppressLint("MissingPermission")
     fun stopScan(): Boolean {
+        FbbLog.debug("stopScan")
         val leScanner = scanner
         val callback = activeCallback
         ScanResultDispatcher.isScanning = false
@@ -123,12 +117,12 @@ class BleScanner(private val context: Context) {
         rssiThreshold = null
         if (leScanner == null || callback == null) return true
         return try {
-            if (hasScanPermission()) {
+            if (BlePermissions.hasScanPermission(context)) {
                 leScanner.stopScan(callback)
             }
             true
         } catch (e: Exception) {
-            Log.e(TAG, "stopScan threw: ${e.message}")
+            FbbLog.error("stopScan threw: ${e.message}")
             false
         } finally {
             scanner = null
@@ -253,16 +247,6 @@ class BleScanner(private val context: Context) {
         val manager =
             context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         return manager?.adapter
-    }
-
-    private fun hasScanPermission(): Boolean {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Manifest.permission.BLUETOOTH_SCAN
-        } else {
-            Manifest.permission.ACCESS_FINE_LOCATION
-        }
-        return ContextCompat.checkSelfPermission(context, permission) ==
-            PackageManager.PERMISSION_GRANTED
     }
 
     fun dispose() {

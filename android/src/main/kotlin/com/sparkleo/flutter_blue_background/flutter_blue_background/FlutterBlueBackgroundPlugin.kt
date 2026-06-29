@@ -23,6 +23,7 @@ class FlutterBlueBackgroundPlugin :
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
+        FbbLog.debug("onAttachedToEngine")
 
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_blue_background")
         channel.setMethodCallHandler(this)
@@ -67,12 +68,20 @@ class FlutterBlueBackgroundPlugin :
         call: MethodCall,
         result: Result
     ) {
+        FbbLog.debug("onMethodCall: ${call.method}")
         when (call.method) {
+            "setLogLevel" -> {
+                val idx = call.arguments as? Int ?: FbbLogLevel.DEBUG.ordinal
+                FbbLog.setLevel(idx)
+                result.success(null)
+            }
             "getPlatformVersion" -> {
                 result.success("Android ${android.os.Build.VERSION.RELEASE}")
             }
             "getAdapterState" -> {
-                result.success(BleAdapterState.getState(context))
+                val state = BleAdapterState.getState(context)
+                adapterStateStreamHandler?.refreshState()
+                result.success(state)
             }
             "startService" -> {
                 val title = call.argument<String>("notificationTitle")
@@ -274,6 +283,7 @@ class FlutterBlueBackgroundPlugin :
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        FbbLog.debug("onDetachedFromEngine")
         channel.setMethodCallHandler(null)
         scanResultsChannel.setStreamHandler(null)
         adapterStateChannel.setStreamHandler(null)

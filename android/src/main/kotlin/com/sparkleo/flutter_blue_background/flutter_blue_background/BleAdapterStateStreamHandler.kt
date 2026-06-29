@@ -23,6 +23,7 @@ class BleAdapterStateStreamHandler(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
     private var receiver: BroadcastReceiver? = null
+    private var lastEmittedState: String? = null
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         eventSink = events
@@ -60,6 +61,13 @@ class BleAdapterStateStreamHandler(
     private fun emitCurrentState() {
         val sink = eventSink ?: return
         val state = BleAdapterState.getState(context)
+        if (state == lastEmittedState) return
+        lastEmittedState = state
         mainHandler.post { sink.success(state) }
+    }
+
+    /** Re-emits the current adapter state when it changed (e.g. after permissions). */
+    fun refreshState() {
+        emitCurrentState()
     }
 }

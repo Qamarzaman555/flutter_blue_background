@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:get/get.dart';
@@ -49,6 +50,9 @@ class BleController extends GetxController {
   StreamSubscription<BleConnectionEvent>? _connectionSub;
 
   static const skipUnnamedDevices = true;
+
+  String? _lastNotificationContent;
+  bool _notificationUpdateInFlight = false;
 
   List<BleScanResult> get sortedDevices {
     final list = devices.values.toList();
@@ -107,6 +111,8 @@ class BleController extends GetxController {
   }
 
   Future<void> _onAdapterStreamEvent(BleAdapterState state) async {
+    if (state == adapterState.value) return;
+
     adapterState.value = state;
     _logAdapterState(state, source: 'stream');
 
@@ -213,11 +219,21 @@ class BleController extends GetxController {
   }
 
   Future<void> _updateNotification() async {
-    if (!isRunning.value) return;
-    await _plugin.startService(
-      notificationTitle: 'Flutter Blue Background',
-      notificationContent: _buildNotificationContent(),
-    );
+    if (!isRunning.value || _notificationUpdateInFlight) return;
+
+    final content = _buildNotificationContent();
+    if (content == _lastNotificationContent) return;
+
+    _notificationUpdateInFlight = true;
+    try {
+      await _plugin.startService(
+        notificationTitle: 'Flutter Blue Background',
+        notificationContent: content,
+      );
+      _lastNotificationContent = content;
+    } finally {
+      _notificationUpdateInFlight = false;
+    }
   }
 
   void _addScanResult(BleScanResult result) {
@@ -267,10 +283,16 @@ class BleController extends GetxController {
       Permission.notification,
     ].request();
 
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
     final scanOk = statuses[Permission.bluetoothScan]?.isGranted ?? false;
     final connectOk =
         statuses[Permission.bluetoothConnect]?.isGranted ?? false;
-    return scanOk || connectOk;
+
+    // Android 12+ needs both Nearby Devices permissions for scan + adapter access.
+    return scanOk && connectOk;
   }
 
   void clearLogs() {
@@ -303,6 +325,16 @@ class BleController extends GetxController {
       return;
     }
 
+    // Adapter stream only updates on radio changes — re-poll after grant.
+    adapterState.value = await _plugin.getAdapterState();
+    _logAdapterState(adapterState.value, source: 'poll');
+
+    if (adapterState.value == BleAdapterState.unauthorized) {
+      status.value = 'Bluetooth permission denied — grant Nearby devices '
+          'in system settings';
+      return;
+    }
+
     final started = await _plugin.startService(
       notificationTitle: 'Flutter Blue Background',
       notificationContent: _buildNotificationContent(),
@@ -314,6 +346,7 @@ class BleController extends GetxController {
   Future<void> stopService() async {
     final stopped = await _plugin.stopService();
     isScanning.value = await _plugin.isScanning();
+    _lastNotificationContent = null;
     status.value = stopped ? 'Service stopped' : 'Failed to stop';
     await _refreshRunningState();
   }
@@ -337,6 +370,9 @@ class BleController extends GetxController {
       status.value = 'Bluetooth permission denied';
       return;
     }
+
+    adapterState.value = await _plugin.getAdapterState();
+    _logAdapterState(adapterState.value, source: 'poll');
 
     if (!adapterState.value.canScan) {
       status.value = 'Bluetooth is ${adapterState.value.name}';

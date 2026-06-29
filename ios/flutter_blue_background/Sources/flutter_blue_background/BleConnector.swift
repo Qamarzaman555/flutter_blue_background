@@ -1,7 +1,6 @@
 import CoreBluetooth
 import Flutter
 import Foundation
-import os.log
 
 /// Manages GATT connections using the shared `CBCentralManager` from [BleScanner].
 final class BleConnector: NSObject {
@@ -10,7 +9,6 @@ final class BleConnector: NSObject {
     private static let servicesChangedUuid = CBUUID(string: "2A05")
     private static let cccdUuid = CBUUID(string: "2902")
 
-    private let log = OSLog(subsystem: "com.sparkleo.flutter_blue_background", category: "BleConnector")
     private weak var scanner: BleScanner?
 
     private var eventSink: FlutterEventSink?
@@ -64,6 +62,9 @@ final class BleConnector: NSObject {
 
         emitState(deviceId: deviceId, state: "connecting", mtu: session.mtu)
 
+        let autoConnect = (config["autoConnect"] as? Bool) ?? false
+        FbbLog.debug("connect: \(deviceId) autoConnect=\(autoConnect)")
+
         var options: [String: Any] = [:]
         if let ios = config["ios"] as? [String: Any] {
             if let value = ios["notifyOnConnection"] as? Bool {
@@ -84,14 +85,13 @@ final class BleConnector: NSObject {
 
         central.connect(peripheral, options: options.isEmpty ? nil : options)
 
-        let autoConnect = (config["autoConnect"] as? Bool) ?? false
         if !autoConnect, let millis = config["timeoutMillis"] as? Int, millis > 0 {
             let interval = TimeInterval(millis) / 1000.0
             let timer = Timer(timeInterval: interval, repeats: false) { [weak self] fired in
                 fired.invalidate()
                 guard let self = self else { return }
                 if self.stateCache[deviceId]?["state"] as? String != "connected" {
-                    os_log("Connection timeout for %{public}@", log: self.log, type: .info, deviceId)
+                    FbbLog.warning("Connection timeout for \(deviceId)")
                     _ = self.disconnect(deviceId: deviceId, config: [:])
                     self.emitState(
                         deviceId: deviceId,
@@ -110,6 +110,7 @@ final class BleConnector: NSObject {
 
     @discardableResult
     func disconnect(deviceId: String, config: [String: Any]) -> Bool {
+        FbbLog.debug("disconnect: \(deviceId)")
         guard let scanner = scanner else { return false }
         guard var session = sessions[deviceId] else {
             emitState(deviceId: deviceId, state: "disconnected")
@@ -338,6 +339,7 @@ extension BleConnector: CBPeripheralDelegate {
 extension BleConnector {
     func handleDidConnect(_ peripheral: CBPeripheral) {
         let deviceId = peripheral.identifier.uuidString
+        FbbLog.debug("didConnect: \(deviceId)")
         guard var session = sessions[deviceId] else { return }
 
         peripheral.delegate = self
@@ -356,6 +358,7 @@ extension BleConnector {
 
     func handleDidFailToConnect(_ peripheral: CBPeripheral, error: Error?) {
         let deviceId = peripheral.identifier.uuidString
+        FbbLog.warning("didFailToConnect: \(deviceId) error=\(error?.localizedDescription ?? "nil")")
         emitState(
             deviceId: deviceId,
             state: "disconnected",
@@ -366,6 +369,7 @@ extension BleConnector {
 
     func handleDidDisconnect(_ peripheral: CBPeripheral, error: Error?) {
         let deviceId = peripheral.identifier.uuidString
+        FbbLog.debug("didDisconnect: \(deviceId) error=\(error?.localizedDescription ?? "nil")")
         emitState(
             deviceId: deviceId,
             state: "disconnected",

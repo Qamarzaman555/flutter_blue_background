@@ -1,4 +1,6 @@
 import 'flutter_blue_background_platform_interface.dart';
+import 'src/fbb_log_level.dart';
+import 'src/fbb_logger.dart';
 import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_connection_state.dart';
 import 'src/models/ble_gatt_service.dart';
@@ -6,6 +8,7 @@ import 'src/models/ble_scan_result.dart';
 import 'src/models/connect_config.dart';
 import 'src/models/scan_config.dart';
 
+export 'src/fbb_log_level.dart';
 export 'src/models/ble_adapter_state.dart';
 export 'src/models/ble_connection_state.dart';
 export 'src/models/ble_gatt_service.dart';
@@ -14,6 +17,21 @@ export 'src/models/connect_config.dart';
 export 'src/models/scan_config.dart';
 
 class FlutterBlueBackground {
+  /// Current log verbosity for the Dart layer.
+  static FbbLogLevel get logLevel => FbbLogger.level;
+
+  /// Plain-text log stream (ANSI stripped). Useful for in-app debug consoles.
+  static Stream<String> get logs => FbbLogger.logs;
+
+  /// Sets plugin log verbosity on Dart and native.
+  ///
+  /// At [FbbLogLevel.verbose], method-channel calls and results are logged with
+  /// colored output in the Dart console (flutter_blue_plus style).
+  static Future<void> setLogLevel(FbbLogLevel level, {bool color = true}) async {
+    FbbLogger.configure(level, color: color);
+    await FlutterBlueBackgroundPlatform.instance.setLogLevel(level);
+  }
+
   Future<String?> getPlatformVersion() {
     return FlutterBlueBackgroundPlatform.instance.getPlatformVersion();
   }
