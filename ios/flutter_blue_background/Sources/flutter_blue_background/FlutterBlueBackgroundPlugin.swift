@@ -32,6 +32,12 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
       binaryMessenger: registrar.messenger()
     )
     connectionStateChannel.setStreamHandler(instance.bleConnector)
+
+    let characteristicValuesChannel = FlutterEventChannel(
+      name: "flutter_blue_background/characteristic_values",
+      binaryMessenger: registrar.messenger()
+    )
+    characteristicValuesChannel.setStreamHandler(CharacteristicValueStreamHandler())
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -160,6 +166,69 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
       ) ?? []
       result(services)
 
+    case "readCharacteristic":
+      guard backgroundService.isServiceRunning(),
+            let args = call.arguments as? [String: Any],
+            let deviceId = args["deviceId"] as? String,
+            let serviceUuid = args["serviceUuid"] as? String,
+            let characteristicUuid = args["characteristicUuid"] as? String else {
+        result(gattErrorMap("Invalid arguments"))
+        return
+      }
+      let instanceId = args["instanceId"] as? Int ?? 0
+      let timeoutMillis = args["timeoutMillis"] as? Int ?? 15_000
+      result(bleConnector.readCharacteristic(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
+        instanceId: instanceId,
+        timeoutMillis: timeoutMillis
+      ))
+
+    case "writeCharacteristic":
+      guard backgroundService.isServiceRunning(),
+            let args = call.arguments as? [String: Any],
+            let deviceId = args["deviceId"] as? String,
+            let serviceUuid = args["serviceUuid"] as? String,
+            let characteristicUuid = args["characteristicUuid"] as? String else {
+        result(gattErrorMap("Invalid arguments"))
+        return
+      }
+      let instanceId = args["instanceId"] as? Int ?? 0
+      let withoutResponse = args["withoutResponse"] as? Bool ?? false
+      let timeoutMillis = args["timeoutMillis"] as? Int ?? 15_000
+      let value = parseValue(args["value"])
+      result(bleConnector.writeCharacteristic(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
+        instanceId: instanceId,
+        value: value,
+        withoutResponse: withoutResponse,
+        timeoutMillis: timeoutMillis
+      ))
+
+    case "setNotifyValue":
+      guard backgroundService.isServiceRunning(),
+            let args = call.arguments as? [String: Any],
+            let deviceId = args["deviceId"] as? String,
+            let serviceUuid = args["serviceUuid"] as? String,
+            let characteristicUuid = args["characteristicUuid"] as? String else {
+        result(gattErrorMap("Invalid arguments"))
+        return
+      }
+      let instanceId = args["instanceId"] as? Int ?? 0
+      let enable = args["enable"] as? Bool ?? false
+      let timeoutMillis = args["timeoutMillis"] as? Int ?? 15_000
+      result(bleConnector.setNotifyValue(
+        deviceId: deviceId,
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristicUuid,
+        instanceId: instanceId,
+        enable: enable,
+        timeoutMillis: timeoutMillis
+      ))
+
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -170,5 +239,20 @@ public class FlutterBlueBackgroundPlugin: NSObject, FlutterPlugin {
     bleScanner.detachAdapterStateSink()
     bleConnector.detachSink()
     adapterStateStreamHandler = nil
+    CharacteristicValueDispatcher.setSink(nil)
+  }
+
+  private func gattErrorMap(_ message: String) -> [String: Any] {
+    ["success": false, "errorMessage": "FBB: \(message)"]
+  }
+
+  private func parseValue(_ raw: Any?) -> Data {
+    if let typed = raw as? FlutterStandardTypedData {
+      return typed.data
+    }
+    if let list = raw as? [Int] {
+      return Data(list.map { UInt8($0 & 0xFF) })
+    }
+    return Data()
   }
 }

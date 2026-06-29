@@ -44,16 +44,39 @@ class CharacteristicPropertyChips extends StatelessWidget {
   }
 }
 
+typedef GattCharacteristicAction = Future<void> Function(
+  String serviceUuid,
+  BleGattCharacteristic characteristic,
+);
+
 /// Expandable tree of [BleGattService] and their characteristics.
 class GattServiceTree extends StatelessWidget {
   const GattServiceTree({
     super.key,
     required this.services,
     this.isLoading = false,
+    this.characteristicValueHex = const {},
+    this.characteristicValueText = const {},
+    this.notifyingKeys = const {},
+    this.onRead,
+    this.onWrite,
+    this.onToggleNotify,
   });
 
   final List<BleGattService> services;
   final bool isLoading;
+  final Map<String, String> characteristicValueHex;
+  final Map<String, String> characteristicValueText;
+  final Set<String> notifyingKeys;
+  final GattCharacteristicAction? onRead;
+  final GattCharacteristicAction? onWrite;
+  final GattCharacteristicAction? onToggleNotify;
+
+  static String characteristicKey(
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) =>
+      '$serviceUuid|${characteristic.uuid}|${characteristic.instanceId}';
 
   @override
   Widget build(BuildContext context) {
@@ -77,6 +100,9 @@ class GattServiceTree extends StatelessWidget {
       );
     }
 
+    final interactive =
+        onRead != null || onWrite != null || onToggleNotify != null;
+
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -96,9 +122,20 @@ class GattServiceTree extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             children: service.characteristics.map((char) {
+              final key = characteristicKey(service.uuid, char);
+              final valueHex = characteristicValueHex[key];
+              final valueText = characteristicValueText[key];
+              final notifying = notifyingKeys.contains(key);
+
               return ListTile(
                 dense: true,
-                leading: const Icon(Icons.settings_ethernet, size: 20),
+                leading: Icon(
+                  notifying
+                      ? Icons.notifications_active
+                      : Icons.settings_ethernet,
+                  size: 20,
+                  color: notifying ? Colors.teal : null,
+                ),
                 title: Text(
                   'Characteristic',
                   style: Theme.of(context).textTheme.bodySmall,
@@ -107,8 +144,62 @@ class GattServiceTree extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SelectableText(char.uuid),
+                    if (char.instanceId != 0)
+                      Text(
+                        'instanceId: ${char.instanceId}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
                     const SizedBox(height: 6),
                     CharacteristicPropertyChips(properties: char.properties),
+                    if (valueText != null && valueText.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        'text: $valueText',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                    if (valueHex != null) ...[
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        'hex: $valueHex',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                    ],
+                    if (interactive) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (char.canRead && onRead != null)
+                            OutlinedButton.icon(
+                              onPressed: () => onRead!(service.uuid, char),
+                              icon: const Icon(Icons.download, size: 16),
+                              label: const Text('Read'),
+                            ),
+                          if (char.canWrite && onWrite != null)
+                            OutlinedButton.icon(
+                              onPressed: () => onWrite!(service.uuid, char),
+                              icon: const Icon(Icons.upload, size: 16),
+                              label: const Text('Write'),
+                            ),
+                          if (char.canNotify && onToggleNotify != null)
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  onToggleNotify!(service.uuid, char),
+                              icon: Icon(
+                                notifying
+                                    ? Icons.notifications_off
+                                    : Icons.notifications,
+                                size: 16,
+                              ),
+                              label: Text(notifying ? 'Stop notify' : 'Notify'),
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               );

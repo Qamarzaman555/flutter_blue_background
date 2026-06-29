@@ -5,6 +5,7 @@ import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:get/get.dart';
 
 import '../ble/ble_controller.dart';
+import '../widgets/gatt_exchange_log.dart';
 import '../widgets/gatt_service_tree.dart';
 
 /// Full device view: advertisement data, connection, GATT services.
@@ -163,8 +164,50 @@ class DeviceDetailScreen extends StatelessWidget {
                   GattServiceTree(
                     services: services,
                     isLoading: discovering,
+                    characteristicValueHex: Map<String, String>.fromEntries(
+                      controller.characteristicValueHex.entries.where(
+                        (e) => e.key.startsWith('$deviceId|'),
+                      ).map(
+                        (e) => MapEntry(
+                            e.key.substring(deviceId.length + 1), e.value),
+                      ),
+                    ),
+                    characteristicValueText: Map<String, String>.fromEntries(
+                      controller.characteristicValueText.entries.where(
+                        (e) => e.key.startsWith('$deviceId|'),
+                      ).map(
+                        (e) => MapEntry(
+                            e.key.substring(deviceId.length + 1), e.value),
+                      ),
+                    ),
+                    notifyingKeys: controller.notifyingCharacteristics
+                        .where((k) => k.startsWith('$deviceId|'))
+                        .map((k) => k.substring(deviceId.length + 1))
+                        .toSet(),
+                    onRead: isConnected
+                        ? (serviceUuid, char) => controller
+                            .readCharacteristicFor(deviceId, serviceUuid, char)
+                        : null,
+                    onWrite: isConnected
+                        ? (serviceUuid, char) =>
+                            _promptWrite(context, controller, deviceId, serviceUuid, char)
+                        : null,
+                    onToggleNotify: isConnected
+                        ? (serviceUuid, char) => controller.toggleNotifyFor(
+                              deviceId,
+                              serviceUuid,
+                              char,
+                            )
+                        : null,
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _Section(
+              title: 'Sent & received',
+              child: GattExchangeLog(
+                entries: controller.exchangeLogFor(deviceId),
               ),
             ),
             const SizedBox(height: 12),
@@ -185,6 +228,50 @@ class DeviceDetailScreen extends StatelessWidget {
       }),
     );
   }
+}
+
+Future<void> _promptWrite(
+  BuildContext context,
+  BleController controller,
+  String deviceId,
+  String serviceUuid,
+  BleGattCharacteristic characteristic,
+) async {
+  final textController = TextEditingController(text: 'mac');
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Write text'),
+      content: TextField(
+        controller: textController,
+        decoration: const InputDecoration(
+          labelText: 'Text to send',
+          hintText: 'mac',
+          helperText: 'Sent as UTF-8 bytes (e.g. mac → 6d 61 63)',
+        ),
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Send'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+
+  await controller.writeStringFor(
+    deviceId,
+    serviceUuid,
+    characteristic,
+    textController.text,
+  );
 }
 
 class _Section extends StatelessWidget {

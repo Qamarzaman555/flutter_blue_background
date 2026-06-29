@@ -18,6 +18,7 @@ class FlutterBlueBackgroundPlugin :
     private lateinit var scanResultsChannel: EventChannel
     private lateinit var adapterStateChannel: EventChannel
     private lateinit var connectionStateChannel: EventChannel
+    private lateinit var characteristicValuesChannel: EventChannel
     private lateinit var context: Context
     private var adapterStateStreamHandler: BleAdapterStateStreamHandler? = null
 
@@ -60,6 +61,20 @@ class FlutterBlueBackgroundPlugin :
 
             override fun onCancel(arguments: Any?) {
                 ConnectionStateDispatcher.setSink(null)
+            }
+        })
+
+        characteristicValuesChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_blue_background/characteristic_values",
+        )
+        characteristicValuesChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                CharacteristicValueDispatcher.setSink(events)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                CharacteristicValueDispatcher.setSink(null)
             }
         })
     }
@@ -218,6 +233,77 @@ class FlutterBlueBackgroundPlugin :
                 ) ?: emptyList()
                 result.success(services)
             }
+            "readCharacteristic" -> {
+                val args = characteristicArgs(call) ?: run {
+                    result.success(gattErrorMap("Invalid arguments"))
+                    return
+                }
+                val timeout = call.argument<Int>("timeoutMillis")?.toLong() ?: 15_000L
+                val connector = BleConnectorHolder.connector
+                if (connector == null || !FlutterBlueBackgroundService.isRunning) {
+                    result.success(gattErrorMap("Background service is not running"))
+                    return
+                }
+                result.success(
+                    connector.readCharacteristic(
+                        args.deviceId,
+                        args.serviceUuid,
+                        args.characteristicUuid,
+                        args.instanceId,
+                        timeout,
+                    ),
+                )
+            }
+            "writeCharacteristic" -> {
+                val args = characteristicArgs(call) ?: run {
+                    result.success(gattErrorMap("Invalid arguments"))
+                    return
+                }
+                val value = parseByteArray(call, "value")
+                val withoutResponse = call.argument<Boolean>("withoutResponse") ?: false
+                val timeout = call.argument<Int>("timeoutMillis")?.toLong() ?: 15_000L
+                val connector = BleConnectorHolder.connector
+                if (connector == null || !FlutterBlueBackgroundService.isRunning) {
+                    result.success(gattErrorMap("Background service is not running"))
+                    return
+                }
+                result.success(
+                    connector.writeCharacteristic(
+                        args.deviceId,
+                        args.serviceUuid,
+                        args.characteristicUuid,
+                        args.instanceId,
+                        value,
+                        withoutResponse,
+                        timeout,
+                    ),
+                )
+            }
+            "setNotifyValue" -> {
+                val args = characteristicArgs(call) ?: run {
+                    result.success(gattErrorMap("Invalid arguments"))
+                    return
+                }
+                val enable = call.argument<Boolean>("enable") ?: false
+                val forceIndications = call.argument<Boolean>("forceIndications") ?: false
+                val timeout = call.argument<Int>("timeoutMillis")?.toLong() ?: 15_000L
+                val connector = BleConnectorHolder.connector
+                if (connector == null || !FlutterBlueBackgroundService.isRunning) {
+                    result.success(gattErrorMap("Background service is not running"))
+                    return
+                }
+                result.success(
+                    connector.setNotifyValue(
+                        args.deviceId,
+                        args.serviceUuid,
+                        args.characteristicUuid,
+                        args.instanceId,
+                        enable,
+                        forceIndications,
+                        timeout,
+                    ),
+                )
+            }
             else -> result.notImplemented()
         }
     }
@@ -288,8 +374,44 @@ class FlutterBlueBackgroundPlugin :
         scanResultsChannel.setStreamHandler(null)
         adapterStateChannel.setStreamHandler(null)
         connectionStateChannel.setStreamHandler(null)
+        characteristicValuesChannel.setStreamHandler(null)
         adapterStateStreamHandler = null
         ScanResultDispatcher.setSink(null)
         ConnectionStateDispatcher.setSink(null)
+        CharacteristicValueDispatcher.setSink(null)
+    }
+
+    private data class CharacteristicArgs(
+        val deviceId: String,
+        val serviceUuid: String,
+        val characteristicUuid: String,
+        val instanceId: Int,
+    )
+
+    private fun characteristicArgs(call: MethodCall): CharacteristicArgs? {
+        val deviceId = call.argument<String>("deviceId") ?: return null
+        val serviceUuid = call.argument<String>("serviceUuid") ?: return null
+        val characteristicUuid = call.argument<String>("characteristicUuid") ?: return null
+        val instanceId = call.argument<Int>("instanceId") ?: 0
+        if (deviceId.isEmpty() || serviceUuid.isEmpty() || characteristicUuid.isEmpty()) {
+            return null
+        }
+        return CharacteristicArgs(deviceId, serviceUuid, characteristicUuid, instanceId)
+    }
+
+    private fun gattErrorMap(message: String): Map<String, Any?> = mapOf(
+        "success" to false,
+        "errorMessage" to "FBB: $message",
+    )
+
+    private fun parseByteArray(call: MethodCall, key: String): ByteArray {
+        val raw = call.argument<Any>(key) ?: return ByteArray(0)
+        return when (raw) {
+            is ByteArray -> raw
+            is List<*> -> raw.mapNotNull { (it as? Number)?.toInt()?.and(0xFF) }
+                .map { it.toByte() }
+                .toByteArray()
+            else -> ByteArray(0)
+        }
     }
 }

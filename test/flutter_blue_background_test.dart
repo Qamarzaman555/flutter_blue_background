@@ -4,6 +4,7 @@ import 'package:flutter_blue_background/flutter_blue_background_platform_interfa
 import 'package:flutter_blue_background/flutter_blue_background_method_channel.dart';
 import 'package:flutter_blue_background/src/fbb_log_level.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'dart:typed_data';
 
 class MockFlutterBlueBackgroundPlatform
     with MockPlatformInterfaceMixin
@@ -112,6 +113,38 @@ class MockFlutterBlueBackgroundPlatform
     bool subscribeToServicesChanged = true,
   }) =>
       Future.value(const []);
+
+  @override
+  Future<Uint8List> readCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic, {
+    Duration timeout = const Duration(seconds: 15),
+  }) =>
+      Future.value(Uint8List.fromList([0x01]));
+
+  @override
+  Future<void> writeCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    List<int> value, {
+    bool withoutResponse = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) =>
+      Future.value();
+
+  @override
+  Future<void> setNotifyValue(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    bool enable, {
+    bool forceIndications = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) =>
+      Future.value();
+
+  @override
+  Stream<BleCharacteristicValueEvent> get characteristicValues =>
+      const Stream.empty();
 }
 
 void main() {

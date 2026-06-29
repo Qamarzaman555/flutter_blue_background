@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter_blue_background/flutter_blue_background.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'ble_gatt_exchange_entry.dart';
 import 'ble_log_entry.dart';
 import 'ble_notification_builder.dart';
+import '../widgets/gatt_service_tree.dart';
 
 /// Shared BLE state for the example app: service, scan, and GATT connections.
 class BleController extends GetxController {
@@ -16,6 +19,7 @@ class BleController extends GetxController {
   final FlutterBlueBackground _plugin;
 
   static const _maxLogEntries = 40;
+  static const _maxExchangeEntries = 50;
 
   final isRunning = false.obs;
   final isScanning = false.obs;
@@ -32,6 +36,10 @@ class BleController extends GetxController {
   final RxMap<String, List<BleGattService>> discoveredServices =
       <String, List<BleGattService>>{}.obs;
   final RxMap<String, bool> isDiscoveringServices = <String, bool>{}.obs;
+  final RxMap<String, String> characteristicValueHex = <String, String>{}.obs;
+  final RxMap<String, String> characteristicValueText = <String, String>{}.obs;
+  final RxSet<String> notifyingCharacteristics = <String>{}.obs;
+  final RxList<GattExchangeEntry> gattExchangeLog = <GattExchangeEntry>[].obs;
 
   final RxList<String> queriedConnectedDeviceIds = <String>[].obs;
   final RxMap<String, BleConnectionState> queriedConnectionStates =
@@ -48,6 +56,7 @@ class BleController extends GetxController {
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleAdapterState>? _adapterSub;
   StreamSubscription<BleConnectionEvent>? _connectionSub;
+  StreamSubscription<BleCharacteristicValueEvent>? _characteristicValuesSub;
 
   static const skipUnnamedDevices = true;
 
@@ -72,6 +81,8 @@ class BleController extends GetxController {
     _scanSub = _plugin.scanResults.listen(_addScanResult);
     _adapterSub = _plugin.adapterState.listen(_onAdapterStreamEvent);
     _connectionSub = _plugin.connectionState.listen(_onConnectionEvent);
+    _characteristicValuesSub =
+        _plugin.characteristicValues.listen(_onCharacteristicValue);
     _logAdapterState(adapterState.value, source: 'initial');
     unawaited(fetchPlatformVersion());
   }
@@ -81,6 +92,7 @@ class BleController extends GetxController {
     _scanSub?.cancel();
     _adapterSub?.cancel();
     _connectionSub?.cancel();
+    _characteristicValuesSub?.cancel();
     super.onClose();
   }
 
@@ -144,8 +156,7 @@ class BleController extends GetxController {
     }
 
     if (event.state == BleConnectionState.connected) {
-      status.value =
-          'Connected to ${event.deviceId} (mtu ${event.mtu ?? '?'})';
+      status.value = 'Connected to ${event.deviceId} (mtu ${event.mtu ?? '?'})';
       unawaited(discoverServicesFor(event.deviceId));
     } else if (event.state == BleConnectionState.disconnected) {
       discoveredServices.remove(event.deviceId);
@@ -288,8 +299,7 @@ class BleController extends GetxController {
     }
 
     final scanOk = statuses[Permission.bluetoothScan]?.isGranted ?? false;
-    final connectOk =
-        statuses[Permission.bluetoothConnect]?.isGranted ?? false;
+    final connectOk = statuses[Permission.bluetoothConnect]?.isGranted ?? false;
 
     // Android 12+ needs both Nearby Devices permissions for scan + adapter access.
     return scanOk && connectOk;
@@ -464,6 +474,7 @@ class BleController extends GetxController {
     await _plugin.disconnect(deviceId);
     _setConnectionState(deviceId, BleConnectionState.disconnected);
     discoveredServices.remove(deviceId);
+    _clearCharacteristicStateForDevice(deviceId);
     status.value = 'Disconnected';
     await _updateNotification();
   }
@@ -523,6 +534,218 @@ class BleController extends GetxController {
     }
   }
 
+  String characteristicKey(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) =>
+      '$deviceId|${GattServiceTree.characteristicKey(serviceUuid, characteristic)}';
+
+  void _onCharacteristicValue(BleCharacteristicValueEvent event) {
+    if (!event.success) return;
+
+    final key =
+        '${event.deviceId}|${event.serviceUuid}|${event.characteristicUuid}|${event.instanceId}';
+    _storeCharacteristicValue(key, event.value);
+
+    final text = bytesToString(event.value);
+    final hex = _formatBytes(event.value);
+    final source = event.source.name;
+
+    switch (event.source) {
+      case BleCharacteristicValueSource.notification:
+      case BleCharacteristicValueSource.read:
+        _logExchange(
+          deviceId: event.deviceId,
+          direction: 'received',
+          characteristicUuid: event.characteristicUuid,
+          text: text,
+          hex: hex,
+          source: source,
+        );
+        gattStatusMessage.value =
+            'received ($source) ${event.characteristicUuid}: $text';
+      case BleCharacteristicValueSource.write:
+        gattStatusMessage.value =
+            'sent ($source) ${event.characteristicUuid}: $text';
+    }
+  }
+
+  void _storeCharacteristicValue(String key, List<int> bytes) {
+    characteristicValueHex[key] = _formatBytes(bytes);
+    characteristicValueText[key] = bytesToString(bytes);
+    characteristicValueHex.refresh();
+    characteristicValueText.refresh();
+  }
+
+  void _logExchange({
+    required String deviceId,
+    required String direction,
+    required String characteristicUuid,
+    required String text,
+    required String hex,
+    required String source,
+  }) {
+    gattExchangeLog.insert(
+      0,
+      GattExchangeEntry(
+        timestamp: DateTime.now(),
+        deviceId: deviceId,
+        direction: direction,
+        characteristicUuid: characteristicUuid,
+        text: text,
+        hex: hex,
+        source: source,
+      ),
+    );
+    if (gattExchangeLog.length > _maxExchangeEntries) {
+      gattExchangeLog.removeRange(_maxExchangeEntries, gattExchangeLog.length);
+    }
+    gattExchangeLog.refresh();
+  }
+
+  List<GattExchangeEntry> exchangeLogFor(String deviceId) =>
+      gattExchangeLog.where((e) => e.deviceId == deviceId).toList();
+
+  void _clearCharacteristicStateForDevice(String deviceId) {
+    final prefix = '$deviceId|';
+    characteristicValueHex.removeWhere((key, _) => key.startsWith(prefix));
+    characteristicValueText.removeWhere((key, _) => key.startsWith(prefix));
+    notifyingCharacteristics.removeWhere((key) => key.startsWith(prefix));
+    characteristicValueHex.refresh();
+    characteristicValueText.refresh();
+    notifyingCharacteristics.refresh();
+    gattExchangeLog.removeWhere((e) => e.deviceId == deviceId);
+    gattExchangeLog.refresh();
+  }
+
+  String _formatBytes(List<int> bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+
+  /// UTF-8 text to send over GATT (e.g. "mac" → 6d 61 63).
+  List<int> stringToBytes(String text) => utf8.encode(text);
+
+  /// Device bytes back to a display string.
+  String bytesToString(List<int> bytes) {
+    if (bytes.isEmpty) return '';
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  BleCharacteristicId _characteristicId(
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) =>
+      BleCharacteristicId(
+        serviceUuid: serviceUuid,
+        characteristicUuid: characteristic.uuid,
+        instanceId: characteristic.instanceId,
+      );
+
+  Future<void> readCharacteristicFor(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) async {
+    final id = _characteristicId(serviceUuid, characteristic);
+    gattStatusMessage.value = 'readCharacteristic(${characteristic.uuid})…';
+    try {
+      final value = await _plugin.readCharacteristic(deviceId, id);
+      final key = characteristicKey(deviceId, serviceUuid, characteristic);
+      _storeCharacteristicValue(key, value);
+      _logExchange(
+        deviceId: deviceId,
+        direction: 'received',
+        characteristicUuid: characteristic.uuid,
+        text: bytesToString(value),
+        hex: _formatBytes(value),
+        source: 'read',
+      );
+      gattStatusMessage.value =
+          'readCharacteristic(): ${bytesToString(value)}';
+    } on FbbException catch (e) {
+      gattStatusMessage.value = 'readCharacteristic() failed: $e';
+    } catch (e) {
+      gattStatusMessage.value = 'readCharacteristic() failed: $e';
+    }
+  }
+
+  Future<void> writeStringFor(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+    String text,
+  ) async {
+    final bytes = stringToBytes(text);
+    final id = _characteristicId(serviceUuid, characteristic);
+    gattStatusMessage.value = 'writeCharacteristic(${characteristic.uuid})…';
+    try {
+      await _plugin.writeCharacteristic(
+        deviceId,
+        id,
+        bytes,
+        withoutResponse:
+            characteristic.properties.contains('writeWithoutResponse'),
+      );
+      final key = characteristicKey(deviceId, serviceUuid, characteristic);
+      _storeCharacteristicValue(key, bytes);
+      _logExchange(
+        deviceId: deviceId,
+        direction: 'sent',
+        characteristicUuid: characteristic.uuid,
+        text: text,
+        hex: _formatBytes(bytes),
+        source: 'write',
+      );
+      gattStatusMessage.value = 'writeCharacteristic(): sent "$text"';
+    } on FbbException catch (e) {
+      gattStatusMessage.value = 'writeCharacteristic() failed: $e';
+    } catch (e) {
+      gattStatusMessage.value = 'writeCharacteristic() failed: $e';
+    }
+  }
+
+  Future<void> writeCharacteristicFor(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+    List<int> value, {
+    bool withoutResponse = false,
+  }) async {
+    await writeStringFor(
+      deviceId,
+      serviceUuid,
+      characteristic,
+      bytesToString(value),
+    );
+  }
+
+  Future<void> toggleNotifyFor(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) async {
+    final key = characteristicKey(deviceId, serviceUuid, characteristic);
+    final enable = !notifyingCharacteristics.contains(key);
+    final id = _characteristicId(serviceUuid, characteristic);
+    gattStatusMessage.value =
+        'setNotifyValue(${characteristic.uuid}, enable: $enable)…';
+    try {
+      await _plugin.setNotifyValue(deviceId, id, enable);
+      if (enable) {
+        notifyingCharacteristics.add(key);
+      } else {
+        notifyingCharacteristics.remove(key);
+      }
+      notifyingCharacteristics.refresh();
+      gattStatusMessage.value =
+          'setNotifyValue(): ${enable ? 'enabled' : 'disabled'}';
+    } on FbbException catch (e) {
+      gattStatusMessage.value = 'setNotifyValue() failed: $e';
+    } catch (e) {
+      gattStatusMessage.value = 'setNotifyValue() failed: $e';
+    }
+  }
+
   // — Connection queries —
 
   Future<void> fetchConnectedDevices() async {
@@ -556,8 +779,7 @@ class BleController extends GetxController {
       final state = await _plugin.getConnectionState(deviceId);
       queriedConnectionStates[deviceId] = state;
       queriedConnectionStates.refresh();
-      queryStatusMessage.value =
-          'getConnectionState($deviceId): ${state.name}';
+      queryStatusMessage.value = 'getConnectionState($deviceId): ${state.name}';
     } catch (e) {
       queryStatusMessage.value = 'getConnectionState() failed: $e';
     } finally {

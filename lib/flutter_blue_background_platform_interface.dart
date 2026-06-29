@@ -1,9 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_blue_background_method_channel.dart';
 import 'src/fbb_log_level.dart';
 import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_connection_state.dart';
+import 'src/models/ble_characteristic_id.dart';
+import 'src/models/ble_characteristic_value_event.dart';
 import 'src/models/ble_gatt_service.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/connect_config.dart';
@@ -155,5 +159,49 @@ abstract class FlutterBlueBackgroundPlatform extends PlatformInterface {
     bool subscribeToServicesChanged = true,
   }) {
     throw UnimplementedError('discoverServices() has not been implemented.');
+  }
+
+  /// Reads a GATT characteristic value.
+  ///
+  /// Throws [FbbException] when the operation fails.
+  Future<Uint8List> readCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic, {
+    Duration timeout = const Duration(seconds: 15),
+  }) {
+    throw UnimplementedError('readCharacteristic() has not been implemented.');
+  }
+
+  /// Writes [value] to a GATT characteristic.
+  ///
+  /// Set [withoutResponse] for write-without-response characteristics.
+  /// Throws [FbbException] when the operation fails.
+  Future<void> writeCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    List<int> value, {
+    bool withoutResponse = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) {
+    throw UnimplementedError('writeCharacteristic() has not been implemented.');
+  }
+
+  /// Enables or disables notifications/indications on a characteristic.
+  ///
+  /// Incoming values are delivered on [characteristicValues].
+  /// Throws [FbbException] when the operation fails.
+  Future<void> setNotifyValue(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    bool enable, {
+    bool forceIndications = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) {
+    throw UnimplementedError('setNotifyValue() has not been implemented.');
+  }
+
+  /// Stream of characteristic values from reads, writes, and notifications.
+  Stream<BleCharacteristicValueEvent> get characteristicValues {
+    throw UnimplementedError('characteristicValues has not been implemented.');
   }
 }

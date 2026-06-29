@@ -4,8 +4,11 @@ import 'package:flutter/services.dart';
 import 'flutter_blue_background_platform_interface.dart';
 import 'src/fbb_log_level.dart';
 import 'src/fbb_logger.dart';
+import 'src/gatt_operation_result.dart';
 import 'src/models/ble_adapter_state.dart';
 import 'src/models/ble_connection_state.dart';
+import 'src/models/ble_characteristic_id.dart';
+import 'src/models/ble_characteristic_value_event.dart';
 import 'src/models/ble_gatt_service.dart';
 import 'src/models/ble_scan_result.dart';
 import 'src/models/connect_config.dart';
@@ -32,9 +35,15 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
   final connectionStateChannel =
       const EventChannel('flutter_blue_background/connection_state');
 
+  /// The event channel that streams GATT characteristic value events.
+  @visibleForTesting
+  final characteristicValuesChannel =
+      const EventChannel('flutter_blue_background/characteristic_values');
+
   Stream<BleScanResult>? _scanResults;
   Stream<BleAdapterState>? _adapterState;
   Stream<BleConnectionEvent>? _connectionState;
+  Stream<BleCharacteristicValueEvent>? _characteristicValues;
 
   Future<T?> _invokeMethod<T>(String method, [dynamic arguments]) async {
     FbbLogger.logMethodArgs(method, arguments);
@@ -218,5 +227,77 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
     return services
         .map((e) => BleGattService.fromMap(e as Map<dynamic, dynamic>))
         .toList();
+  }
+
+  Map<String, dynamic> _characteristicArgs(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    Duration timeout,
+  ) {
+    return {
+      'deviceId': deviceId,
+      ...characteristic.toMap(),
+      'timeoutMillis': timeout.inMilliseconds,
+    };
+  }
+
+  @override
+  Future<Uint8List> readCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final result = await _invokeMethod<Map<dynamic, dynamic>>(
+      'readCharacteristic',
+      _characteristicArgs(deviceId, characteristic, timeout),
+    );
+    return GattOperationResult.parseRead('readCharacteristic', result);
+  }
+
+  @override
+  Future<void> writeCharacteristic(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    List<int> value, {
+    bool withoutResponse = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final result = await _invokeMethod<Map<dynamic, dynamic>>(
+      'writeCharacteristic',
+      {
+        ..._characteristicArgs(deviceId, characteristic, timeout),
+        'value': Uint8List.fromList(value),
+        'withoutResponse': withoutResponse,
+      },
+    );
+    GattOperationResult.parseVoid('writeCharacteristic', result);
+  }
+
+  @override
+  Future<void> setNotifyValue(
+    String deviceId,
+    BleCharacteristicId characteristic,
+    bool enable, {
+    bool forceIndications = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final result = await _invokeMethod<Map<dynamic, dynamic>>(
+      'setNotifyValue',
+      {
+        ..._characteristicArgs(deviceId, characteristic, timeout),
+        'enable': enable,
+        'forceIndications': forceIndications,
+      },
+    );
+    GattOperationResult.parseVoid('setNotifyValue', result);
+  }
+
+  @override
+  Stream<BleCharacteristicValueEvent> get characteristicValues {
+    _characteristicValues ??= characteristicValuesChannel
+        .receiveBroadcastStream()
+        .map((event) => BleCharacteristicValueEvent.fromMap(
+            event as Map<dynamic, dynamic>));
+    return _characteristicValues!;
   }
 }

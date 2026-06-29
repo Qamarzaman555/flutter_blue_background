@@ -21,6 +21,18 @@ final class BleConnector: NSObject {
         var timeoutTimer: Timer?
         var discoverCompletion: (([[String: Any]]?) -> Void)?
         var mtuCompletion: ((Int) -> Void)?
+        var pendingOp: PendingCharacteristicOp?
+    }
+
+    private struct PendingCharacteristicOp {
+        let type: String
+        let serviceUuid: String
+        let characteristicUuid: String
+        let instanceId: Int
+        let semaphore: DispatchSemaphore
+        var success: Bool = false
+        var value: Data?
+        var errorMessage: String?
     }
 
     private var sessions: [String: Session] = [:]
@@ -181,6 +193,154 @@ final class BleConnector: NSObject {
         return result
     }
 
+    func readCharacteristic(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        timeoutMillis: Int
+    ) -> [String: Any] {
+        guard var session = sessions[deviceId],
+              session.peripheral.state == .connected else {
+            return gattError("Device not connected")
+        }
+        guard let characteristic = findCharacteristic(
+            peripheral: session.peripheral,
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid
+        ) else {
+            return gattError("Characteristic not found")
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var op = PendingCharacteristicOp(
+            type: "read",
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid,
+            instanceId: instanceId,
+            semaphore: semaphore
+        )
+        session.pendingOp = op
+        sessions[deviceId] = session
+
+        session.peripheral.readValue(for: characteristic)
+
+        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
+        if semaphore.wait(timeout: wait) == .timedOut {
+            sessions[deviceId]?.pendingOp = nil
+            return gattError("Read timed out")
+        }
+        defer { sessions[deviceId]?.pendingOp = nil }
+        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("Read failed")
+    }
+
+    func writeCharacteristic(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        value: Data,
+        withoutResponse: Bool,
+        timeoutMillis: Int
+    ) -> [String: Any] {
+        guard var session = sessions[deviceId],
+              session.peripheral.state == .connected else {
+            return gattError("Device not connected")
+        }
+        guard let characteristic = findCharacteristic(
+            peripheral: session.peripheral,
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid
+        ) else {
+            return gattError("Characteristic not found")
+        }
+
+        let writeType: CBCharacteristicWriteType =
+            withoutResponse ? .withoutResponse : .withResponse
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var op = PendingCharacteristicOp(
+            type: "write",
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid,
+            instanceId: instanceId,
+            semaphore: semaphore
+        )
+        session.pendingOp = op
+        sessions[deviceId] = session
+
+        session.peripheral.writeValue(value, for: characteristic, type: writeType)
+
+        if withoutResponse {
+            op.success = true
+            op.value = value
+            session.pendingOp = op
+            sessions[deviceId] = session
+            emitCharacteristicValue(
+                deviceId: deviceId,
+                serviceUuid: serviceUuid,
+                characteristicUuid: characteristicUuid,
+                instanceId: instanceId,
+                value: value,
+                source: "write",
+                success: true,
+                errorMessage: nil
+            )
+            sessions[deviceId]?.pendingOp = nil
+            return op.toResultMap()
+        }
+
+        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
+        if semaphore.wait(timeout: wait) == .timedOut {
+            sessions[deviceId]?.pendingOp = nil
+            return gattError("Write timed out")
+        }
+        defer { sessions[deviceId]?.pendingOp = nil }
+        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("Write failed")
+    }
+
+    func setNotifyValue(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        enable: Bool,
+        timeoutMillis: Int
+    ) -> [String: Any] {
+        guard var session = sessions[deviceId],
+              session.peripheral.state == .connected else {
+            return gattError("Device not connected")
+        }
+        guard let characteristic = findCharacteristic(
+            peripheral: session.peripheral,
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid
+        ) else {
+            return gattError("Characteristic not found")
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var op = PendingCharacteristicOp(
+            type: "notify",
+            serviceUuid: serviceUuid,
+            characteristicUuid: characteristicUuid,
+            instanceId: instanceId,
+            semaphore: semaphore
+        )
+        session.pendingOp = op
+        sessions[deviceId] = session
+
+        session.peripheral.setNotifyValue(enable, for: characteristic)
+
+        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
+        if semaphore.wait(timeout: wait) == .timedOut {
+            sessions[deviceId]?.pendingOp = nil
+            return gattError("setNotifyValue timed out")
+        }
+        defer { sessions[deviceId]?.pendingOp = nil }
+        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("setNotifyValue failed")
+    }
+
     func dispose() {
         onBluetoothAdapterOff()
     }
@@ -201,6 +361,7 @@ final class BleConnector: NSObject {
         }
         sessions.removeAll()
         discoverPendingCounts.removeAll()
+        CharacteristicValueDispatcher.reset()
     }
 
     func detachSink() {
@@ -250,9 +411,14 @@ final class BleConnector: NSObject {
                 if p.contains(.writeWithoutResponse) { props.append("writeWithoutResponse") }
                 if p.contains(.notify) { props.append("notify") }
                 if p.contains(.indicate) { props.append("indicate") }
+                let descriptors = (characteristic.descriptors ?? []).map {
+                    ["uuid": $0.uuid.uuidString.lowercased()]
+                }
                 return [
                     "uuid": characteristic.uuid.uuidString.lowercased(),
+                    "instanceId": 0,
                     "properties": props,
+                    "descriptors": descriptors,
                 ]
             }
             return [
@@ -287,6 +453,67 @@ final class BleConnector: NSObject {
         } else if session.config["subscribeToServicesChanged"] as? Bool ?? true {
             subscribeServicesChanged(peripheral)
         }
+    }
+
+    private func findCharacteristic(
+        peripheral: CBPeripheral,
+        serviceUuid: String,
+        characteristicUuid: String
+    ) -> CBCharacteristic? {
+        let service = peripheral.services?.first {
+            normalizeUuid($0.uuid.uuidString) == normalizeUuid(serviceUuid)
+        }
+        return service?.characteristics?.first {
+            normalizeUuid($0.uuid.uuidString) == normalizeUuid(characteristicUuid)
+        }
+    }
+
+    private func normalizeUuid(_ uuid: String) -> String {
+        uuid.lowercased().replacingOccurrences(of: "-", with: "")
+    }
+
+    private func emitCharacteristicValue(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        value: Data,
+        source: String,
+        success: Bool,
+        errorMessage: String?
+    ) {
+        var event: [String: Any] = [
+            "deviceId": deviceId,
+            "serviceUuid": serviceUuid,
+            "characteristicUuid": characteristicUuid,
+            "instanceId": instanceId,
+            "value": FlutterStandardTypedData(bytes: value),
+            "source": source,
+            "success": success,
+        ]
+        if let errorMessage = errorMessage, !success {
+            event["errorMessage"] = errorMessage.hasPrefix("FBB:") ? errorMessage : "FBB: \(errorMessage)"
+        }
+        CharacteristicValueDispatcher.emit(event)
+    }
+
+    private func gattError(_ message: String) -> [String: Any] {
+        ["success": false, "errorMessage": "FBB: \(message)"]
+    }
+}
+
+private extension BleConnector.PendingCharacteristicOp {
+    func toResultMap() -> [String: Any] {
+        var map: [String: Any] = ["success": success]
+        if let value = value {
+            map["value"] = FlutterStandardTypedData(bytes: value)
+        }
+        if let errorMessage = errorMessage {
+            map["errorMessage"] = errorMessage.hasPrefix("FBB:") ? errorMessage : "FBB: \(errorMessage)"
+        } else if !success {
+            map["errorMessage"] = "FBB: GATT operation failed"
+        }
+        return map
     }
 }
 
@@ -328,9 +555,109 @@ extension BleConnector: CBPeripheralDelegate {
         guard var pending = discoverPendingCounts[deviceId] else { return }
         pending -= 1
         discoverPendingCounts[deviceId] = pending
+        for characteristic in service.characteristics ?? [] {
+            peripheral.discoverDescriptors(for: characteristic)
+        }
         if pending <= 0 {
             completeDiscoveryIfReady(deviceId: deviceId, peripheral: peripheral)
         }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverDescriptorsFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        // Descriptors merged when discovery completes.
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        let deviceId = peripheral.identifier.uuidString
+        guard sessions[deviceId] != nil else { return }
+        let serviceUuid = characteristic.service?.uuid.uuidString.lowercased() ?? ""
+        let charUuid = characteristic.uuid.uuidString.lowercased()
+        let value = characteristic.value ?? Data()
+        let success = error == nil
+
+        if var op = sessions[deviceId]?.pendingOp, op.type == "read" {
+            emitCharacteristicValue(
+                deviceId: deviceId,
+                serviceUuid: serviceUuid,
+                characteristicUuid: charUuid,
+                instanceId: 0,
+                value: value,
+                source: "read",
+                success: success,
+                errorMessage: error?.localizedDescription
+            )
+            op.success = success
+            op.value = success ? value : nil
+            op.errorMessage = error?.localizedDescription
+            sessions[deviceId]?.pendingOp = op
+            op.semaphore.signal()
+            return
+        }
+
+        if characteristic.isNotifying {
+            emitCharacteristicValue(
+                deviceId: deviceId,
+                serviceUuid: serviceUuid,
+                characteristicUuid: charUuid,
+                instanceId: 0,
+                value: value,
+                source: "notification",
+                success: success,
+                errorMessage: error?.localizedDescription
+            )
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        let deviceId = peripheral.identifier.uuidString
+        guard var op = sessions[deviceId]?.pendingOp else { return }
+        guard op.type == "write" else { return }
+        let serviceUuid = characteristic.service?.uuid.uuidString.lowercased() ?? ""
+        let charUuid = characteristic.uuid.uuidString.lowercased()
+        let success = error == nil
+        let value = characteristic.value ?? Data()
+
+        emitCharacteristicValue(
+            deviceId: deviceId,
+            serviceUuid: serviceUuid,
+            characteristicUuid: charUuid,
+            instanceId: 0,
+            value: value,
+            source: "write",
+            success: success,
+            errorMessage: error?.localizedDescription
+        )
+
+        op.success = success
+        op.value = value
+        op.errorMessage = error?.localizedDescription
+        sessions[deviceId]?.pendingOp = op
+        op.semaphore.signal()
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        let deviceId = peripheral.identifier.uuidString
+        guard var op = sessions[deviceId]?.pendingOp, op.type == "notify" else { return }
+        op.success = error == nil
+        op.errorMessage = error?.localizedDescription
+        sessions[deviceId]?.pendingOp = op
+        op.semaphore.signal()
     }
 }
 
