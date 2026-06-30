@@ -288,15 +288,17 @@ class BleController extends GetxController {
   }
 
   Future<bool> ensurePermissions() async {
+    if (!Platform.isAndroid) {
+      // iOS prompts for Bluetooth via NSBluetoothAlwaysUsageDescription when
+      // CoreBluetooth is used. No push/local notification permission is needed.
+      return true;
+    }
+
     final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.notification,
     ].request();
-
-    if (!Platform.isAndroid) {
-      return true;
-    }
 
     final scanOk = statuses[Permission.bluetoothScan]?.isGranted ?? false;
     final connectOk = statuses[Permission.bluetoothConnect]?.isGranted ?? false;
