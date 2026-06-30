@@ -9,8 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_blue_background_example/app/ble_example_app.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_blue_background_example/main.dart';
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 

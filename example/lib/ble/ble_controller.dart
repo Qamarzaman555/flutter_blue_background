@@ -541,11 +541,24 @@ class BleController extends GetxController {
   ) =>
       '$deviceId|${GattServiceTree.characteristicKey(serviceUuid, characteristic)}';
 
-  void _onCharacteristicValue(BleCharacteristicValueEvent event) {
-    if (!event.success) return;
+  String _eventCharacteristicKey(BleCharacteristicValueEvent event) =>
+      '${event.deviceId}|${GattServiceTree.characteristicKey(
+        event.serviceUuid,
+        BleGattCharacteristic(
+          uuid: event.characteristicUuid,
+          instanceId: event.instanceId,
+        ),
+      )}';
 
-    final key =
-        '${event.deviceId}|${event.serviceUuid}|${event.characteristicUuid}|${event.instanceId}';
+  void _onCharacteristicValue(BleCharacteristicValueEvent event) {
+    if (!event.success) {
+      gattStatusMessage.value =
+          'GATT ${event.source.name} failed on ${event.characteristicUuid}: '
+          '${event.errorMessage ?? event.errorCode ?? "unknown"}';
+      return;
+    }
+
+    final key = _eventCharacteristicKey(event);
     _storeCharacteristicValue(key, event.value);
 
     final text = bytesToString(event.value);
@@ -558,6 +571,7 @@ class BleController extends GetxController {
         _logExchange(
           deviceId: event.deviceId,
           direction: 'received',
+          serviceUuid: event.serviceUuid,
           characteristicUuid: event.characteristicUuid,
           text: text,
           hex: hex,
@@ -581,6 +595,7 @@ class BleController extends GetxController {
   void _logExchange({
     required String deviceId,
     required String direction,
+    required String serviceUuid,
     required String characteristicUuid,
     required String text,
     required String hex,
@@ -592,6 +607,7 @@ class BleController extends GetxController {
         timestamp: DateTime.now(),
         deviceId: deviceId,
         direction: direction,
+        serviceUuid: serviceUuid,
         characteristicUuid: characteristicUuid,
         text: text,
         hex: hex,
@@ -655,6 +671,7 @@ class BleController extends GetxController {
       _logExchange(
         deviceId: deviceId,
         direction: 'received',
+        serviceUuid: serviceUuid,
         characteristicUuid: characteristic.uuid,
         text: bytesToString(value),
         hex: _formatBytes(value),
@@ -672,30 +689,36 @@ class BleController extends GetxController {
     String deviceId,
     String serviceUuid,
     BleGattCharacteristic characteristic,
-    String text,
-  ) async {
-    final bytes = stringToBytes(text);
+    String text, {
+    bool? withoutResponse,
+    String lineEnding = '',
+  }) async {
+    final payload = '$text$lineEnding';
+    final bytes = stringToBytes(payload);
     final id = _characteristicId(serviceUuid, characteristic);
+    final hasWriteNoResp =
+        characteristic.properties.contains('writeWithoutResponse');
+    final useWithoutResponse = withoutResponse ?? hasWriteNoResp;
     gattStatusMessage.value = 'writeCharacteristic(${characteristic.uuid})…';
     try {
       await _plugin.writeCharacteristic(
         deviceId,
         id,
         bytes,
-        withoutResponse:
-            characteristic.properties.contains('writeWithoutResponse'),
+        withoutResponse: useWithoutResponse,
       );
       final key = characteristicKey(deviceId, serviceUuid, characteristic);
       _storeCharacteristicValue(key, bytes);
       _logExchange(
         deviceId: deviceId,
         direction: 'sent',
+        serviceUuid: serviceUuid,
         characteristicUuid: characteristic.uuid,
-        text: text,
+        text: payload,
         hex: _formatBytes(bytes),
         source: 'write',
       );
-      gattStatusMessage.value = 'writeCharacteristic(): sent "$text"';
+      gattStatusMessage.value = 'writeCharacteristic(): sent "$payload"';
     } on FbbException catch (e) {
       gattStatusMessage.value = 'writeCharacteristic() failed: $e';
     } catch (e) {

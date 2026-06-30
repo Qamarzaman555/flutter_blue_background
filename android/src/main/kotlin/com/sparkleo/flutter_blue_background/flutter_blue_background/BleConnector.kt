@@ -330,6 +330,12 @@ class BleConnector(private val context: Context) {
             return gattError("writeCharacteristic returned false")
         }
 
+        FbbLog.info(
+            "writeCharacteristic: $characteristicUuid instanceId=$instanceId " +
+                "withoutResponse=$withoutResponse bytes=${value.size} " +
+                "hex=${value.joinToString(" ") { "%02x".format(it) }}",
+        )
+
         // Match iOS / FBP: write-without-response is fire-and-forget at the ATT layer.
         if (withoutResponse) {
             op.success = true
@@ -375,7 +381,12 @@ class BleConnector(private val context: Context) {
         val characteristic = findCharacteristic(gatt, serviceUuid, characteristicUuid, instanceId)
             ?: return gattError("Characteristic not found")
 
-        if (!gatt.setCharacteristicNotification(characteristic, enable)) {
+        val notificationRegistered = gatt.setCharacteristicNotification(characteristic, enable)
+        FbbLog.info(
+            "setNotifyValue: setCharacteristicNotification($characteristicUuid, enable=$enable) " +
+                "→ $notificationRegistered",
+        )
+        if (!notificationRegistered) {
             return gattError("setCharacteristicNotification returned false")
         }
 
@@ -384,6 +395,11 @@ class BleConnector(private val context: Context) {
             FbbLog.warning(
                 "CCCD descriptor for characteristic not found: ${characteristic.uuid}",
             )
+            if (enable) {
+                return gattError(
+                    "CCCD descriptor not found for characteristic ${characteristic.uuid}",
+                )
+            }
             return mapOf("success" to true, "cccdWritten" to false)
         }
 
@@ -438,10 +454,15 @@ class BleConnector(private val context: Context) {
             return gattError("writeDescriptor returned false")
         }
 
+        FbbLog.info(
+            "setNotifyValue: writing CCCD for $characteristicUuid " +
+                "(enable=$enable, bytes=${cccdValue.joinToString(" ") { "%02x".format(it) }})",
+        )
+
         latch.await(timeoutMillis.coerceAtLeast(1000), TimeUnit.MILLISECONDS)
         session.pendingCharOp = null
         val result = op.toResultMap().toMutableMap()
-        result["cccdWritten"] = true
+        result["cccdWritten"] = op.success
         return result
     }
 
@@ -670,6 +691,14 @@ class BleConnector(private val context: Context) {
                 val session = sessions[deviceId] ?: return
                 val op = session.pendingCharOp ?: return
                 if (op.type != "descriptor") return
+                val characteristic = descriptor.characteristic ?: return
+                if (!uuidMatches(op.serviceUuid, characteristic.service.uuid)) return
+                if (!uuidMatches(op.characteristicUuid, characteristic.uuid)) return
+                if (characteristicInstanceId(characteristic) != op.instanceId) return
+                FbbLog.info(
+                    "onDescriptorWrite: ${characteristic.uuid} status=$status " +
+                        "(pending ${op.characteristicUuid})",
+                )
                 op.success = status == BluetoothGatt.GATT_SUCCESS
                 if (!op.success) {
                     op.errorCode = status
@@ -684,7 +713,20 @@ class BleConnector(private val context: Context) {
         characteristic: BluetoothGattCharacteristic,
     ): BluetoothGattDescriptor? {
         characteristic.descriptors.firstOrNull { it.uuid == CCCD_UUID }?.let { return it }
-        return runCatching { characteristic.getDescriptor(CCCD_UUID) }.getOrNull()
+        characteristic.getDescriptor(CCCD_UUID)?.let { return it }
+        // Some stacks omit CCCD from discovery; add it so writeDescriptor can enable notify.
+        return runCatching {
+            val descriptor = BluetoothGattDescriptor(
+                CCCD_UUID,
+                BluetoothGattDescriptor.PERMISSION_READ or
+                    BluetoothGattDescriptor.PERMISSION_WRITE,
+            )
+            if (characteristic.addDescriptor(descriptor)) {
+                descriptor
+            } else {
+                null
+            }
+        }.getOrNull()
     }
 
     @SuppressLint("MissingPermission")
@@ -779,6 +821,10 @@ class BleConnector(private val context: Context) {
             deviceId, serviceUuid, charUuid, instanceId, value, "write", success, status,
         )
 
+        FbbLog.info(
+            "onCharacteristicWrite: $charUuid status=$status len=${value.size}",
+        )
+
         val op = session.pendingCharOp ?: return
         if (op.type != "write") return
         op.success = success
@@ -795,8 +841,10 @@ class BleConnector(private val context: Context) {
         characteristic: BluetoothGattCharacteristic,
         value: ByteArray,
     ) {
-        FbbLog.debug(
-            "onCharacteristicChanged: $deviceId ${characteristic.uuid} len=${value.size}",
+        val hexPreview = value.take(32).joinToString(" ") { "%02x".format(it) }
+        FbbLog.info(
+            "onCharacteristicChanged: $deviceId ${characteristic.uuid} " +
+                "len=${value.size} hex=$hexPreview",
         )
         emitCharacteristicValue(
             deviceId,

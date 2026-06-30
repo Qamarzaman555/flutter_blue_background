@@ -234,6 +234,8 @@ class DeviceDetailScreen extends StatelessWidget {
   }
 }
 
+enum _WriteResponseMode { auto, withoutResponse, withResponse }
+
 Future<void> _promptWrite(
   BuildContext context,
   BleController controller,
@@ -242,39 +244,149 @@ Future<void> _promptWrite(
   BleGattCharacteristic characteristic,
 ) async {
   final textController = TextEditingController(text: 'mac');
+  var lineEnding = '';
+  var writeMode = _WriteResponseMode.auto;
+
+  final hasWrite = characteristic.properties.contains('write');
+  final hasWriteNoResp =
+      characteristic.properties.contains('writeWithoutResponse');
+
   final confirmed = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Write text'),
-      content: TextField(
-        controller: textController,
-        decoration: const InputDecoration(
-          labelText: 'Text to send',
-          hintText: 'mac',
-          helperText: 'Sent as UTF-8 bytes (e.g. mac → 6d 61 63)',
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: const Text('Write text'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SelectableText(
+                'service:\n$serviceUuid',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                'characteristic:\n${characteristic.uuid}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: textController,
+                decoration: const InputDecoration(
+                  labelText: 'Text to send',
+                  hintText: 'mac',
+                  helperText:
+                      'Sends exactly what you type. Some UART-style devices '
+                      'only act on a full line — try LF or CRLF below if '
+                      'you get no reply.',
+                ),
+                autofocus: true,
+                textInputAction: TextInputAction.done,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Line ending',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              RadioGroup<String>(
+                groupValue: lineEnding,
+                onChanged: (value) =>
+                    setState(() => lineEnding = value ?? ''),
+                child: Column(
+                  children: [
+                    RadioListTile<String>(
+                      dense: true,
+                      title: const Text(r'None (default)'),
+                      subtitle:
+                          const Text('Raw bytes — works for most GATT devices'),
+                      value: '',
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      title: const Text(r'LF (\n)'),
+                      subtitle: const Text('Unix / many UART firmwares'),
+                      value: '\n',
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      title: const Text(r'CR (\r)'),
+                      value: '\r',
+                    ),
+                    RadioListTile<String>(
+                      dense: true,
+                      title: const Text(r'CRLF (\r\n)'),
+                      subtitle:
+                          const Text('Windows-style serial / some Leo devices'),
+                      value: '\r\n',
+                    ),
+                  ],
+                ),
+              ),
+              if (hasWrite && hasWriteNoResp) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Write mode',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                RadioGroup<_WriteResponseMode>(
+                  groupValue: writeMode,
+                  onChanged: (value) => setState(
+                    () => writeMode = value ?? _WriteResponseMode.auto,
+                  ),
+                  child: Column(
+                    children: [
+                      RadioListTile<_WriteResponseMode>(
+                        dense: true,
+                        title:
+                            const Text('Auto (without response if available)'),
+                        value: _WriteResponseMode.auto,
+                      ),
+                      RadioListTile<_WriteResponseMode>(
+                        dense: true,
+                        title: const Text('Write without response'),
+                        value: _WriteResponseMode.withoutResponse,
+                      ),
+                      RadioListTile<_WriteResponseMode>(
+                        dense: true,
+                        title: const Text('Write with response'),
+                        value: _WriteResponseMode.withResponse,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-        autofocus: true,
-        textInputAction: TextInputAction.done,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Send'),
-        ),
-      ],
     ),
   );
   if (confirmed != true) return;
+
+  final withoutResponse = switch (writeMode) {
+    _WriteResponseMode.auto => null,
+    _WriteResponseMode.withoutResponse => true,
+    _WriteResponseMode.withResponse => false,
+  };
 
   await controller.writeStringFor(
     deviceId,
     serviceUuid,
     characteristic,
     textController.text,
+    withoutResponse: withoutResponse,
+    lineEnding: lineEnding,
   );
 }
 

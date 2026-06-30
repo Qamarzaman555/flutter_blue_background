@@ -76,7 +76,7 @@ class GattServiceTree extends StatelessWidget {
     String serviceUuid,
     BleGattCharacteristic characteristic,
   ) =>
-      '$serviceUuid|${characteristic.uuid}|${characteristic.instanceId}';
+      '${serviceUuid.toLowerCase()}|${characteristic.uuid.toLowerCase()}|${characteristic.instanceId}';
 
   @override
   Widget build(BuildContext context) {

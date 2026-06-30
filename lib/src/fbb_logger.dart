@@ -106,8 +106,25 @@ class FbbLogger {
     return '$ansi$text${_Ansi.reset}';
   }
 
-  static String _stripAnsi(String value) =>
-      value.replaceAll(RegExp(r'\x1B\[[0-9;]*m'), '');
+  static String _stripAnsi(String value) {
+    final result = StringBuffer();
+    var i = 0;
+    while (i < value.length) {
+      if (value.codeUnitAt(i) == 0x1B &&
+          i + 1 < value.length &&
+          value.codeUnitAt(i + 1) == 0x5B) {
+        i += 2;
+        while (i < value.length && value.codeUnitAt(i) != 0x6D) {
+          i++;
+        }
+        if (i < value.length) i++;
+      } else {
+        result.writeCharCode(value.codeUnitAt(i));
+        i++;
+      }
+    }
+    return result.toString();
+  }
 }
 
 class _Ansi {

@@ -289,7 +289,7 @@ class MethodChannelFlutterBlueBackground extends FlutterBlueBackgroundPlatform {
         'forceIndications': forceIndications,
       },
     );
-    GattOperationResult.parseVoid('setNotifyValue', result);
+    GattOperationResult.parseSetNotify('setNotifyValue', result);
   }
 
   @override

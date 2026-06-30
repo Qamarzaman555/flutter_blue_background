@@ -23,7 +23,8 @@ class GattExchangeLog extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text(
           'No data sent or received yet.\n'
-          'Write text (e.g. mac) to RX and enable notify on TX for UART.',
+          'Write to RX, enable notify on TX. UART-style devices may need '
+          'a line ending (LF or CRLF) before they respond.',
           style: Theme.of(context).textTheme.bodySmall,
           textAlign: TextAlign.center,
         ),
@@ -51,7 +52,15 @@ class GattExchangeLog extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${_formatTime(entry.timestamp)} · ${entry.source} · ${entry.characteristicUuid}',
+                '${_formatTime(entry.timestamp)} · ${entry.source}',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              SelectableText(
+                'service: ${entry.serviceUuid}',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              SelectableText(
+                'characteristic: ${entry.characteristicUuid}',
                 style: Theme.of(context).textTheme.labelSmall,
               ),
               const SizedBox(height: 4),

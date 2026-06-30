@@ -20,6 +20,17 @@ class GattOperationResult {
     _ensureSuccess(method, map);
   }
 
+  static void parseSetNotify(String method, Map<dynamic, dynamic>? map) {
+    _ensureSuccess(method, map);
+    final cccdWritten = map!['cccdWritten'] as bool?;
+    if (cccdWritten == false) {
+      throw FbbException(
+        method,
+        'FBB: CCCD descriptor was not written — notifications are not active',
+      );
+    }
+  }
+
   static void _ensureSuccess(String method, Map<dynamic, dynamic>? map) {
     if (map == null) {
       throw FbbException(method, 'FBB: No response from native layer');
