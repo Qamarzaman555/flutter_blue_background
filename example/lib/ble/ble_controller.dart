@@ -452,7 +452,6 @@ class BleController extends GetxController {
         mtu: 512,
         connectionPriority: ConnectionPriority.high,
       ),
-      ios: IosConnectOptions(enableAutoReconnect: true),
     );
 
     final started = await _plugin.connect(device.deviceId, config);
@@ -513,7 +512,9 @@ class BleController extends GetxController {
     try {
       final negotiated = await _plugin.requestMtu(deviceId, mtu);
       deviceMtu[deviceId] = negotiated;
-      gattStatusMessage.value = 'requestMtu(): negotiated $negotiated';
+      deviceMtu.refresh();
+      gattStatusMessage.value = 'requestMtu(): negotiated $negotiated'
+          '${negotiated < mtu ? ' (iOS negotiates MTU automatically)' : ''}';
     } catch (e) {
       gattStatusMessage.value = 'requestMtu() failed: $e';
     }

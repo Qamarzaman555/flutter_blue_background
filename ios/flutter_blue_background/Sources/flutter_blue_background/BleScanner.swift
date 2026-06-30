@@ -18,6 +18,11 @@ import Foundation
 class BleScanner: NSObject {
 
     private static let maxCacheSize = 256
+    static let queueKey = DispatchSpecificKey<UInt8>()
+    private static let queueKeyValue: UInt8 = 1
+
+    /// Serial queue for all CoreBluetooth central/peripheral work.
+    let bleQueue = DispatchQueue(label: "com.sparkleo.flutter_blue_background.ble", qos: .userInitiated)
 
     private var centralManager: CBCentralManager!
     private var eventSink: FlutterEventSink?
@@ -49,9 +54,15 @@ class BleScanner: NSObject {
 
     override init() {
         super.init()
-        // Use the main queue so event sink callbacks are delivered on the
-        // platform thread Flutter expects.
-        centralManager = CBCentralManager(delegate: self, queue: nil)
+        bleQueue.setSpecific(key: Self.queueKey, value: Self.queueKeyValue)
+        centralManager = CBCentralManager(delegate: self, queue: bleQueue)
+    }
+
+    func performOnBleQueue<T>(_ work: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: Self.queueKey) != nil {
+            return work()
+        }
+        return bleQueue.sync(execute: work)
     }
 
     deinit {
@@ -67,6 +78,10 @@ class BleScanner: NSObject {
     // MARK: - Public API
 
     func startScan(_ config: [String: Any]) -> Bool {
+        performOnBleQueue { startScanOnBleQueue(config) }
+    }
+
+    private func startScanOnBleQueue(_ config: [String: Any]) -> Bool {
         let serviceUuidStrings = (config["serviceUuids"] as? [String]) ?? []
         pendingServiceUuids = serviceUuidStrings.isEmpty
             ? nil
@@ -111,6 +126,10 @@ class BleScanner: NSObject {
     }
 
     func stopScan() -> Bool {
+        performOnBleQueue { stopScanOnBleQueue() }
+    }
+
+    private func stopScanOnBleQueue() -> Bool {
         FbbLog.debug("stopScan")
         hasPendingScan = false
         cancelTimeoutTimer()
@@ -139,7 +158,8 @@ class BleScanner: NSObject {
 
     func setAdapterStateSink(_ sink: @escaping FlutterEventSink) {
         adapterStateSink = sink
-        sink(mapAdapterState(centralManager.state))
+        let state = performOnBleQueue { mapAdapterState(centralManager.state) }
+        sink(state)
     }
 
     func detachAdapterStateSink() {
@@ -147,15 +167,18 @@ class BleScanner: NSObject {
     }
 
     func getAdapterState() -> String {
-        mapAdapterState(centralManager.state)
+        performOnBleQueue { mapAdapterState(centralManager.state) }
     }
 
     func isAdapterReady() -> Bool {
-        centralManager.state == .poweredOn
+        performOnBleQueue { centralManager.state == .poweredOn }
     }
 
     private func emitAdapterState() {
-        adapterStateSink?(mapAdapterState(centralManager.state))
+        let state = mapAdapterState(centralManager.state)
+        DispatchQueue.main.async { [weak self] in
+            self?.adapterStateSink?(state)
+        }
     }
 
     private func mapAdapterState(_ state: CBManagerState) -> String {
@@ -189,6 +212,10 @@ class BleScanner: NSObject {
 
     /// Returns a retained `CBPeripheral` for [deviceId], if discovered or retrieved.
     func peripheral(for deviceId: String) -> CBPeripheral? {
+        performOnBleQueue { peripheralOnBleQueue(for: deviceId) }
+    }
+
+    func peripheralOnBleQueue(for deviceId: String) -> CBPeripheral? {
         if let cached = peripheralCache[deviceId] {
             return cached
         }
@@ -340,7 +367,9 @@ extension BleScanner: CBCentralManagerDelegate {
 
         cacheResult(peripheral.identifier.uuidString, payload)
         peripheralCache[peripheral.identifier.uuidString] = peripheral
-        eventSink?(payload)
+        DispatchQueue.main.async { [weak self] in
+            self?.eventSink?(payload)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

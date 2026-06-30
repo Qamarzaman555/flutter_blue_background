@@ -33,10 +33,68 @@ final class BleConnector: NSObject {
         var success: Bool = false
         var value: Data?
         var errorMessage: String?
+
+        func toResultMap() -> [String: Any] {
+            var map: [String: Any] = ["success": success]
+            if let value = value {
+                map["value"] = FlutterStandardTypedData(bytes: value)
+            }
+            if let errorMessage = errorMessage {
+                map["errorMessage"] = errorMessage.hasPrefix("FBB:") ? errorMessage : "FBB: \(errorMessage)"
+            } else if !success {
+                map["errorMessage"] = "FBB: GATT operation failed"
+            }
+            return map
+        }
     }
 
     private var sessions: [String: Session] = [:]
     private var discoverPendingCounts: [String: Int] = [:]
+
+    private final class ResultBox<T> {
+        var value: T
+        init(_ value: T) { self.value = value }
+    }
+
+    /// Chains callers waiting on an in-flight GATT service discovery.
+    private func appendDiscoverCompletion(
+        deviceId: String,
+        _ completion: @escaping ([[String: Any]]?) -> Void
+    ) {
+        guard var session = sessions[deviceId] else {
+            completion(nil)
+            return
+        }
+        if let existing = session.discoverCompletion {
+            session.discoverCompletion = { services in
+                existing(services)
+                completion(services)
+            }
+        } else {
+            session.discoverCompletion = completion
+        }
+        sessions[deviceId] = session
+    }
+
+    /// Starts discovery on the BLE queue and blocks the caller thread until [signal] fires.
+    /// Never blocks the BLE queue itself — delegate callbacks must run there.
+    private func waitForBleOperation(
+        scanner: BleScanner,
+        timeoutMillis: Int,
+        start: @escaping (_ signal: DispatchSemaphore) -> Void,
+        onTimeout: @escaping () -> Void
+    ) -> Bool {
+        let signal = DispatchSemaphore(value: 0)
+        scanner.bleQueue.async {
+            start(signal)
+        }
+        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
+        if signal.wait(timeout: wait) == .timedOut {
+            scanner.bleQueue.async(execute: onTimeout)
+            return false
+        }
+        return true
+    }
 
     init(scanner: BleScanner) {
         self.scanner = scanner
@@ -47,8 +105,15 @@ final class BleConnector: NSObject {
 
     func connect(deviceId: String, config: [String: Any]) -> Bool {
         guard let scanner = scanner else { return false }
+        return scanner.performOnBleQueue {
+            connectOnBleQueue(deviceId: deviceId, config: config)
+        }
+    }
+
+    private func connectOnBleQueue(deviceId: String, config: [String: Any]) -> Bool {
+        guard let scanner = scanner else { return false }
         let central = scanner.sharedCentralManager
-        guard scanner.isAdapterReady() else {
+        guard central.state == .poweredOn else {
             emitState(
                 deviceId: deviceId,
                 state: "disconnected",
@@ -61,12 +126,25 @@ final class BleConnector: NSObject {
             return true
         }
 
-        guard let peripheral = scanner.peripheral(for: deviceId) else {
+        guard let peripheral = scanner.peripheralOnBleQueue(for: deviceId) else {
             emitState(deviceId: deviceId, state: "disconnected", errorMessage: "Peripheral not found")
             return false
         }
 
-        _ = disconnect(deviceId: deviceId, config: [:])
+        _ = disconnectOnBleQueue(deviceId: deviceId, config: [:])
+
+        if peripheral.state != .disconnected {
+            FbbLog.warning(
+                "connect: peripheral \(deviceId) state=\(peripheral.state.rawValue); cancel and retry"
+            )
+            central.cancelPeripheralConnection(peripheral)
+            emitState(
+                deviceId: deviceId,
+                state: "disconnected",
+                errorMessage: "Previous connection attempt still in progress; retry shortly"
+            )
+            return false
+        }
 
         var session = Session(peripheral: peripheral, config: config)
         sessions[deviceId] = session
@@ -75,27 +153,12 @@ final class BleConnector: NSObject {
         emitState(deviceId: deviceId, state: "connecting", mtu: session.mtu)
 
         let autoConnect = (config["autoConnect"] as? Bool) ?? false
-        FbbLog.debug("connect: \(deviceId) autoConnect=\(autoConnect)")
+        let options = buildConnectOptions(from: config)
+        FbbLog.debug(
+            "connect: \(deviceId) autoConnect=\(autoConnect) peripheralState=\(peripheral.state.rawValue) options=\(options?.keys.sorted() ?? [])"
+        )
 
-        var options: [String: Any] = [:]
-        if let ios = config["ios"] as? [String: Any] {
-            if let value = ios["notifyOnConnection"] as? Bool {
-                options[CBConnectPeripheralOptionNotifyOnConnectionKey] = value
-            }
-            if let value = ios["notifyOnDisconnection"] as? Bool {
-                options[CBConnectPeripheralOptionNotifyOnDisconnectionKey] = value
-            }
-            if let value = ios["notifyOnNotification"] as? Bool {
-                options[CBConnectPeripheralOptionNotifyOnNotificationKey] = value
-            }
-            if #available(iOS 17.0, *) {
-                if let value = ios["enableAutoReconnect"] as? Bool {
-                    options[CBConnectPeripheralOptionEnableAutoReconnect] = value
-                }
-            }
-        }
-
-        central.connect(peripheral, options: options.isEmpty ? nil : options)
+        central.connect(peripheral, options: options)
 
         if !autoConnect, let millis = config["timeoutMillis"] as? Int, millis > 0 {
             let interval = TimeInterval(millis) / 1000.0
@@ -122,19 +185,32 @@ final class BleConnector: NSObject {
 
     @discardableResult
     func disconnect(deviceId: String, config: [String: Any]) -> Bool {
+        guard let scanner = scanner else { return false }
+        return scanner.performOnBleQueue {
+            disconnectOnBleQueue(deviceId: deviceId, config: config)
+        }
+    }
+
+    private func disconnectOnBleQueue(deviceId: String, config: [String: Any]) -> Bool {
         FbbLog.debug("disconnect: \(deviceId)")
         guard let scanner = scanner else { return false }
-        guard var session = sessions[deviceId] else {
-            emitState(deviceId: deviceId, state: "disconnected")
+
+        if var session = sessions[deviceId] {
+            session.timeoutTimer?.invalidate()
+            session.timeoutTimer = nil
+            sessions[deviceId] = session
+
+            emitState(deviceId: deviceId, state: "disconnecting", mtu: session.mtu)
+            scanner.sharedCentralManager.cancelPeripheralConnection(session.peripheral)
             return true
         }
 
-        session.timeoutTimer?.invalidate()
-        session.timeoutTimer = nil
-        sessions[deviceId] = session
+        if let peripheral = scanner.peripheralOnBleQueue(for: deviceId),
+           peripheral.state == .connecting || peripheral.state == .connected {
+            scanner.sharedCentralManager.cancelPeripheralConnection(peripheral)
+        }
 
-        emitState(deviceId: deviceId, state: "disconnecting", mtu: session.mtu)
-        scanner.sharedCentralManager.cancelPeripheralConnection(session.peripheral)
+        emitState(deviceId: deviceId, state: "disconnected")
         return true
     }
 
@@ -149,8 +225,19 @@ final class BleConnector: NSObject {
     }
 
     func requestMtu(deviceId: String, mtu: Int) -> Int {
-        // iOS negotiates MTU automatically; return the cached value.
-        sessions[deviceId]?.mtu ?? stateCache[deviceId]?["mtu"] as? Int ?? 23
+        guard let scanner = scanner else { return 23 }
+        return scanner.performOnBleQueue {
+            guard var session = sessions[deviceId],
+                  session.peripheral.state == .connected else {
+                return sessions[deviceId]?.mtu ?? stateCache[deviceId]?["mtu"] as? Int ?? 23
+            }
+            let negotiated = Self.negotiatedMtu(for: session.peripheral)
+            session.mtu = negotiated
+            sessions[deviceId] = session
+            FbbLog.debug("requestMtu: \(deviceId) requested=\(mtu) negotiated=\(negotiated)")
+            emitState(deviceId: deviceId, state: "connected", mtu: negotiated)
+            return negotiated
+        }
     }
 
     func requestConnectionPriority(deviceId: String, priority: Int) {
@@ -162,35 +249,97 @@ final class BleConnector: NSObject {
         timeoutMillis: Int,
         subscribeToServicesChanged: Bool
     ) -> [[String: Any]]? {
-        guard var session = sessions[deviceId] else { return nil }
-        guard session.peripheral.state == .connected else { return nil }
+        guard let scanner = scanner else { return nil }
+        let resultBox = ResultBox<[[String: Any]]?>(nil)
+
+        let completed = waitForBleOperation(
+            scanner: scanner,
+            timeoutMillis: timeoutMillis,
+            start: { signal in
+                self.beginDiscoverServices(
+                    deviceId: deviceId,
+                    subscribeToServicesChanged: subscribeToServicesChanged,
+                    signal: signal,
+                    resultBox: resultBox
+                )
+            },
+            onTimeout: {
+                FbbLog.warning("discoverServices: \(deviceId) timed out")
+                self.sessions[deviceId]?.discoverCompletion = nil
+                self.discoverPendingCounts.removeValue(forKey: deviceId)
+            }
+        )
+        return completed ? resultBox.value : nil
+    }
+
+    private func beginDiscoverServices(
+        deviceId: String,
+        subscribeToServicesChanged: Bool,
+        signal: DispatchSemaphore,
+        resultBox: ResultBox<[[String: Any]]?>
+    ) {
+        guard var session = sessions[deviceId] else {
+            resultBox.value = nil
+            signal.signal()
+            return
+        }
+        guard session.peripheral.state == .connected else {
+            resultBox.value = nil
+            signal.signal()
+            return
+        }
 
         var config = session.config
         config["subscribeToServicesChanged"] = subscribeToServicesChanged
         session.config = config
         sessions[deviceId] = session
 
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: [[String: Any]]?
-
-        session.discoverCompletion = { services in
-            result = services
-            semaphore.signal()
-        }
-        sessions[deviceId] = session
-        discoverPendingCounts[deviceId] = 0
-
-        session.peripheral.discoverServices(nil)
-
-        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
-        if semaphore.wait(timeout: wait) == .timedOut {
-            sessions[deviceId]?.discoverCompletion = nil
-            discoverPendingCounts.removeValue(forKey: deviceId)
-            return nil
+        let filter = config["serviceUuids"] as? [String]
+        if servicesFullyDiscovered(session.peripheral) {
+            let mapped = mapServices(session.peripheral, filter: filter)
+            FbbLog.debug("discoverServices: \(deviceId) returning \(mapped.count) cached service(s)")
+            if subscribeToServicesChanged {
+                subscribeServicesChanged(session.peripheral)
+            }
+            refreshNegotiatedMtu(deviceId: deviceId, peripheral: session.peripheral)
+            resultBox.value = mapped
+            signal.signal()
+            return
         }
 
-        sessions[deviceId]?.discoverCompletion = nil
-        return result
+        appendDiscoverCompletion(deviceId: deviceId) { services in
+            resultBox.value = services
+            signal.signal()
+        }
+
+        if discoverPendingCounts[deviceId] != nil {
+            FbbLog.debug("discoverServices: \(deviceId) joining in-flight discovery")
+            return
+        }
+
+        startGattDiscovery(deviceId: deviceId, peripheral: session.peripheral)
+    }
+
+    private func startGattDiscovery(deviceId: String, peripheral: CBPeripheral) {
+        guard let services = peripheral.services, !services.isEmpty else {
+            FbbLog.debug("discoverServices: \(deviceId) discovering services")
+            peripheral.discoverServices(nil)
+            return
+        }
+
+        let needsCharacteristics = services.filter { $0.characteristics == nil }
+        if needsCharacteristics.isEmpty {
+            completeDiscoveryIfReady(deviceId: deviceId, peripheral: peripheral)
+            return
+        }
+
+        FbbLog.debug(
+            "discoverServices: \(deviceId) discovering characteristics for \(needsCharacteristics.count) service(s)"
+        )
+        discoverPendingCounts[deviceId] = needsCharacteristics.count
+        for service in needsCharacteristics {
+            peripheral.discoverCharacteristics(nil, for: service)
+        }
     }
 
     func readCharacteristic(
@@ -200,6 +349,47 @@ final class BleConnector: NSObject {
         instanceId: Int,
         timeoutMillis: Int
     ) -> [String: Any] {
+        guard let scanner = scanner else { return gattError("Scanner unavailable") }
+        var result: [String: Any] = gattError("Read failed")
+
+        let completed = waitForBleOperation(
+            scanner: scanner,
+            timeoutMillis: timeoutMillis,
+            start: { signal in
+                if let immediate = self.beginReadCharacteristic(
+                    deviceId: deviceId,
+                    serviceUuid: serviceUuid,
+                    characteristicUuid: characteristicUuid,
+                    instanceId: instanceId,
+                    signal: signal
+                ) {
+                    result = immediate
+                    signal.signal()
+                }
+            },
+            onTimeout: {
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        )
+        if !completed {
+            return gattError("Read timed out")
+        }
+        scanner.performOnBleQueue {
+            if let op = self.sessions[deviceId]?.pendingOp {
+                result = op.toResultMap()
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        }
+        return result
+    }
+
+    private func beginReadCharacteristic(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        signal: DispatchSemaphore
+    ) -> [String: Any]? {
         guard var session = sessions[deviceId],
               session.peripheral.state == .connected else {
             return gattError("Device not connected")
@@ -212,26 +402,17 @@ final class BleConnector: NSObject {
             return gattError("Characteristic not found")
         }
 
-        let semaphore = DispatchSemaphore(value: 0)
-        var op = PendingCharacteristicOp(
+        let op = PendingCharacteristicOp(
             type: "read",
             serviceUuid: serviceUuid,
             characteristicUuid: characteristicUuid,
             instanceId: instanceId,
-            semaphore: semaphore
+            semaphore: signal
         )
         session.pendingOp = op
         sessions[deviceId] = session
-
         session.peripheral.readValue(for: characteristic)
-
-        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
-        if semaphore.wait(timeout: wait) == .timedOut {
-            sessions[deviceId]?.pendingOp = nil
-            return gattError("Read timed out")
-        }
-        defer { sessions[deviceId]?.pendingOp = nil }
-        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("Read failed")
+        return nil
     }
 
     func writeCharacteristic(
@@ -243,6 +424,51 @@ final class BleConnector: NSObject {
         withoutResponse: Bool,
         timeoutMillis: Int
     ) -> [String: Any] {
+        guard let scanner = scanner else { return gattError("Scanner unavailable") }
+        var result: [String: Any] = gattError("Write failed")
+
+        let completed = waitForBleOperation(
+            scanner: scanner,
+            timeoutMillis: timeoutMillis,
+            start: { signal in
+                if let immediate = self.beginWriteCharacteristic(
+                    deviceId: deviceId,
+                    serviceUuid: serviceUuid,
+                    characteristicUuid: characteristicUuid,
+                    instanceId: instanceId,
+                    value: value,
+                    withoutResponse: withoutResponse,
+                    signal: signal
+                ) {
+                    result = immediate
+                    signal.signal()
+                }
+            },
+            onTimeout: {
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        )
+        if !completed {
+            return gattError("Write timed out")
+        }
+        scanner.performOnBleQueue {
+            if let op = self.sessions[deviceId]?.pendingOp {
+                result = op.toResultMap()
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        }
+        return result
+    }
+
+    private func beginWriteCharacteristic(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        value: Data,
+        withoutResponse: Bool,
+        signal: DispatchSemaphore
+    ) -> [String: Any]? {
         guard var session = sessions[deviceId],
               session.peripheral.state == .connected else {
             return gattError("Device not connected")
@@ -258,13 +484,12 @@ final class BleConnector: NSObject {
         let writeType: CBCharacteristicWriteType =
             withoutResponse ? .withoutResponse : .withResponse
 
-        let semaphore = DispatchSemaphore(value: 0)
         var op = PendingCharacteristicOp(
             type: "write",
             serviceUuid: serviceUuid,
             characteristicUuid: characteristicUuid,
             instanceId: instanceId,
-            semaphore: semaphore
+            semaphore: signal
         )
         session.pendingOp = op
         sessions[deviceId] = session
@@ -274,8 +499,6 @@ final class BleConnector: NSObject {
         if withoutResponse {
             op.success = true
             op.value = value
-            session.pendingOp = op
-            sessions[deviceId] = session
             emitCharacteristicValue(
                 deviceId: deviceId,
                 serviceUuid: serviceUuid,
@@ -289,14 +512,7 @@ final class BleConnector: NSObject {
             sessions[deviceId]?.pendingOp = nil
             return op.toResultMap()
         }
-
-        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
-        if semaphore.wait(timeout: wait) == .timedOut {
-            sessions[deviceId]?.pendingOp = nil
-            return gattError("Write timed out")
-        }
-        defer { sessions[deviceId]?.pendingOp = nil }
-        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("Write failed")
+        return nil
     }
 
     func setNotifyValue(
@@ -307,6 +523,49 @@ final class BleConnector: NSObject {
         enable: Bool,
         timeoutMillis: Int
     ) -> [String: Any] {
+        guard let scanner = scanner else { return gattError("Scanner unavailable") }
+        var result: [String: Any] = gattError("setNotifyValue failed")
+
+        let completed = waitForBleOperation(
+            scanner: scanner,
+            timeoutMillis: timeoutMillis,
+            start: { signal in
+                if let immediate = self.beginSetNotifyValue(
+                    deviceId: deviceId,
+                    serviceUuid: serviceUuid,
+                    characteristicUuid: characteristicUuid,
+                    instanceId: instanceId,
+                    enable: enable,
+                    signal: signal
+                ) {
+                    result = immediate
+                    signal.signal()
+                }
+            },
+            onTimeout: {
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        )
+        if !completed {
+            return gattError("setNotifyValue timed out")
+        }
+        scanner.performOnBleQueue {
+            if let op = self.sessions[deviceId]?.pendingOp {
+                result = op.toResultMap()
+                self.sessions[deviceId]?.pendingOp = nil
+            }
+        }
+        return result
+    }
+
+    private func beginSetNotifyValue(
+        deviceId: String,
+        serviceUuid: String,
+        characteristicUuid: String,
+        instanceId: Int,
+        enable: Bool,
+        signal: DispatchSemaphore
+    ) -> [String: Any]? {
         guard var session = sessions[deviceId],
               session.peripheral.state == .connected else {
             return gattError("Device not connected")
@@ -319,26 +578,17 @@ final class BleConnector: NSObject {
             return gattError("Characteristic not found")
         }
 
-        let semaphore = DispatchSemaphore(value: 0)
-        var op = PendingCharacteristicOp(
+        let op = PendingCharacteristicOp(
             type: "notify",
             serviceUuid: serviceUuid,
             characteristicUuid: characteristicUuid,
             instanceId: instanceId,
-            semaphore: semaphore
+            semaphore: signal
         )
         session.pendingOp = op
         sessions[deviceId] = session
-
         session.peripheral.setNotifyValue(enable, for: characteristic)
-
-        let wait = DispatchTime.now() + .milliseconds(max(timeoutMillis, 1000))
-        if semaphore.wait(timeout: wait) == .timedOut {
-            sessions[deviceId]?.pendingOp = nil
-            return gattError("setNotifyValue timed out")
-        }
-        defer { sessions[deviceId]?.pendingOp = nil }
-        return sessions[deviceId]?.pendingOp?.toResultMap() ?? gattError("setNotifyValue failed")
+        return nil
     }
 
     func dispose() {
@@ -391,7 +641,28 @@ final class BleConnector: NSObject {
             payload["errorCode"] = errorCode
         }
         stateCache[deviceId] = payload
-        eventSink?(payload)
+        DispatchQueue.main.async { [weak self] in
+            self?.eventSink?(payload)
+        }
+    }
+
+    private static func negotiatedMtu(for peripheral: CBPeripheral) -> Int {
+        guard peripheral.state == .connected else { return 23 }
+        return peripheral.maximumWriteValueLength(for: .withoutResponse) + 3
+    }
+
+    private func servicesFullyDiscovered(_ peripheral: CBPeripheral) -> Bool {
+        guard let services = peripheral.services, !services.isEmpty else { return false }
+        return services.allSatisfy { $0.characteristics != nil }
+    }
+
+    private func refreshNegotiatedMtu(deviceId: String, peripheral: CBPeripheral) {
+        guard var session = sessions[deviceId] else { return }
+        let mtu = Self.negotiatedMtu(for: peripheral)
+        guard mtu != session.mtu else { return }
+        session.mtu = mtu
+        sessions[deviceId] = session
+        emitState(deviceId: deviceId, state: "connected", mtu: mtu)
     }
 
     private func mapServices(_ peripheral: CBPeripheral, filter: [String]?) -> [[String: Any]] {
@@ -448,8 +719,11 @@ final class BleConnector: NSObject {
         let filter = session.config["serviceUuids"] as? [String]
         let mapped = mapServices(peripheral, filter: filter)
 
+        refreshNegotiatedMtu(deviceId: deviceId, peripheral: peripheral)
+
         if let completion = session.discoverCompletion {
             completion(mapped)
+            sessions[deviceId]?.discoverCompletion = nil
         } else if session.config["subscribeToServicesChanged"] as? Bool ?? true {
             subscribeServicesChanged(peripheral)
         }
@@ -500,20 +774,39 @@ final class BleConnector: NSObject {
     private func gattError(_ message: String) -> [String: Any] {
         ["success": false, "errorMessage": "FBB: \(message)"]
     }
-}
 
-private extension BleConnector.PendingCharacteristicOp {
-    func toResultMap() -> [String: Any] {
-        var map: [String: Any] = ["success": success]
-        if let value = value {
-            map["value"] = FlutterStandardTypedData(bytes: value)
+    /// CoreBluetooth expects NSNumber booleans and treats omitted keys as false.
+    /// Passing explicit `false` (or non-NSNumber values) can trigger
+    /// "One or more parameters were invalid" on connect.
+    private func buildConnectOptions(from config: [String: Any]) -> [String: Any]? {
+        guard let ios = config["ios"] as? [String: Any] else { return nil }
+
+        var options: [String: Any] = [:]
+        if iosConnectFlag(ios, key: "notifyOnConnection") {
+            options[CBConnectPeripheralOptionNotifyOnConnectionKey] = NSNumber(value: true)
         }
-        if let errorMessage = errorMessage {
-            map["errorMessage"] = errorMessage.hasPrefix("FBB:") ? errorMessage : "FBB: \(errorMessage)"
-        } else if !success {
-            map["errorMessage"] = "FBB: GATT operation failed"
+        if iosConnectFlag(ios, key: "notifyOnDisconnection") {
+            options[CBConnectPeripheralOptionNotifyOnDisconnectionKey] = NSNumber(value: true)
         }
-        return map
+        if iosConnectFlag(ios, key: "notifyOnNotification") {
+            options[CBConnectPeripheralOptionNotifyOnNotificationKey] = NSNumber(value: true)
+        }
+        if #available(iOS 17.0, *) {
+            if iosConnectFlag(ios, key: "enableAutoReconnect") {
+                options[CBConnectPeripheralOptionEnableAutoReconnect] = NSNumber(value: true)
+            }
+        }
+        return options.isEmpty ? nil : options
+    }
+
+    private func iosConnectFlag(_ ios: [String: Any], key: String) -> Bool {
+        if let value = ios[key] as? Bool {
+            return value
+        }
+        if let value = ios[key] as? NSNumber {
+            return value.boolValue
+        }
+        return false
     }
 }
 
@@ -529,13 +822,17 @@ extension BleConnector: CBPeripheralDelegate {
         guard sessions[deviceId] != nil else { return }
 
         if let error = error {
-            sessions[deviceId]?.discoverCompletion?(nil)
+            let completion = sessions[deviceId]?.discoverCompletion
+            sessions[deviceId]?.discoverCompletion = nil
+            completion?(nil)
             emitState(deviceId: deviceId, state: "connected", errorMessage: error.localizedDescription)
             return
         }
 
         guard let services = peripheral.services, !services.isEmpty else {
-            sessions[deviceId]?.discoverCompletion?([])
+            let completion = sessions[deviceId]?.discoverCompletion
+            sessions[deviceId]?.discoverCompletion = nil
+            completion?([])
             discoverPendingCounts.removeValue(forKey: deviceId)
             return
         }
@@ -588,7 +885,7 @@ extension BleConnector: CBPeripheralDelegate {
                 deviceId: deviceId,
                 serviceUuid: serviceUuid,
                 characteristicUuid: charUuid,
-                instanceId: 0,
+                instanceId: op.instanceId,
                 value: value,
                 source: "read",
                 success: success,
@@ -633,7 +930,7 @@ extension BleConnector: CBPeripheralDelegate {
             deviceId: deviceId,
             serviceUuid: serviceUuid,
             characteristicUuid: charUuid,
-            instanceId: 0,
+            instanceId: op.instanceId,
             value: value,
             source: "write",
             success: success,
@@ -672,14 +969,14 @@ extension BleConnector {
         peripheral.delegate = self
         session.timeoutTimer?.invalidate()
         session.timeoutTimer = nil
-        session.mtu = 185
+        let mtu = Self.negotiatedMtu(for: peripheral)
+        session.mtu = mtu
         sessions[deviceId] = session
 
-        emitState(deviceId: deviceId, state: "connected", mtu: 185)
+        emitState(deviceId: deviceId, state: "connected", mtu: mtu)
 
         if session.config["discoverServicesOnConnect"] as? Bool ?? true {
-            discoverPendingCounts[deviceId] = 0
-            peripheral.discoverServices(nil)
+            startGattDiscovery(deviceId: deviceId, peripheral: peripheral)
         }
     }
 

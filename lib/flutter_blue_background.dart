@@ -149,7 +149,11 @@ class FlutterBlueBackground {
   Stream<BleConnectionEvent> get connectionState =>
       FlutterBlueBackgroundPlatform.instance.connectionState;
 
-  /// Requests a larger ATT MTU (Android only).
+  /// Requests a larger ATT MTU on Android.
+  ///
+  /// On iOS the stack negotiates MTU automatically; this reads the current
+  /// negotiated value via `maximumWriteValueLength` and emits it on
+  /// [connectionState].
   Future<int> requestMtu(String deviceId, int mtu) {
     return FlutterBlueBackgroundPlatform.instance.requestMtu(deviceId, mtu);
   }
