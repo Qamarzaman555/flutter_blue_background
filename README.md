@@ -109,7 +109,7 @@ The plugin merges these into your app manifest automatically:
 - `POST_NOTIFICATIONS`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`
 - Legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` and `ACCESS_FINE_LOCATION` (API ≤ 30)
 
-Your **app** manifest should still declare runtime permissions you intend to request (see [Permissions](#permissions)). The example app includes:
+Your **app** manifest should declare runtime permissions you intend to request (see [Permissions](#permissions)). The example app includes:
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
