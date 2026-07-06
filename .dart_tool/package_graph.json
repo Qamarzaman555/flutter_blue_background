@@ -5,7 +5,7 @@
   "packages": [
     {
       "name": "flutter_blue_background",
-      "version": "0.0.2",
+      "version": "0.1.0",
       "dependencies": [
         "flutter",
         "plugin_platform_interface"

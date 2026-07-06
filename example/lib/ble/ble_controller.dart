@@ -20,6 +20,10 @@ class BleController extends GetxController {
 
   static const _maxLogEntries = 40;
   static const _maxExchangeEntries = 50;
+  static const _macCommandText = 'measure';
+  static const _macCommandLineEnding = '\n';
+  static const _macCommandInterval = Duration(seconds: 1);
+  static const _nordicUartRxUuid = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
   final isRunning = false.obs;
   final isScanning = false.obs;
@@ -53,10 +57,14 @@ class BleController extends GetxController {
   final RxList<ConnectionLogEntry> connectionEventLog =
       <ConnectionLogEntry>[].obs;
 
+  final RxMap<String, bool> macCommandSending = <String, bool>{}.obs;
+
   StreamSubscription<BleScanResult>? _scanSub;
   StreamSubscription<BleAdapterState>? _adapterSub;
   StreamSubscription<BleConnectionEvent>? _connectionSub;
   StreamSubscription<BleCharacteristicValueEvent>? _characteristicValuesSub;
+
+  final Map<String, Timer> _macCommandTimers = {};
 
   static const skipUnnamedDevices = true;
 
@@ -89,6 +97,7 @@ class BleController extends GetxController {
 
   @override
   void onClose() {
+    _stopAllMacCommandSending();
     _scanSub?.cancel();
     _adapterSub?.cancel();
     _connectionSub?.cancel();
@@ -159,6 +168,7 @@ class BleController extends GetxController {
       status.value = 'Connected to ${event.deviceId} (mtu ${event.mtu ?? '?'})';
       unawaited(discoverServicesFor(event.deviceId));
     } else if (event.state == BleConnectionState.disconnected) {
+      stopMacCommandSending(event.deviceId);
       discoveredServices.remove(event.deviceId);
       isDiscoveringServices.remove(event.deviceId);
       if (event.errorMessage != null) {
@@ -470,6 +480,7 @@ class BleController extends GetxController {
   }
 
   Future<void> disconnectFrom(String deviceId) async {
+    stopMacCommandSending(deviceId);
     _setConnectionState(deviceId, BleConnectionState.disconnecting);
     await _updateNotification();
     await _plugin.disconnect(deviceId);
@@ -627,6 +638,7 @@ class BleController extends GetxController {
       gattExchangeLog.where((e) => e.deviceId == deviceId).toList();
 
   void _clearCharacteristicStateForDevice(String deviceId) {
+    stopMacCommandSending(deviceId);
     final prefix = '$deviceId|';
     characteristicValueHex.removeWhere((key, _) => key.startsWith(prefix));
     characteristicValueText.removeWhere((key, _) => key.startsWith(prefix));
@@ -769,6 +781,120 @@ class BleController extends GetxController {
     } catch (e) {
       gattStatusMessage.value = 'setNotifyValue() failed: $e';
     }
+  }
+
+  // — Periodic mac command —
+
+  bool isMacCommandSending(String deviceId) =>
+      macCommandSending[deviceId] ?? false;
+
+  bool hasWritableCharacteristicForMacCommand(String deviceId) =>
+      _writableTargetForMacCommand(deviceId) != null;
+
+  void toggleMacCommandSending(String deviceId) {
+    if (isMacCommandSending(deviceId)) {
+      stopMacCommandSending(deviceId);
+    } else {
+      unawaited(startMacCommandSending(deviceId));
+    }
+  }
+
+  Future<void> startMacCommandSending(String deviceId) async {
+    if (isMacCommandSending(deviceId)) return;
+
+    if (connectionStates[deviceId] != BleConnectionState.connected) {
+      gattStatusMessage.value = 'Device must be connected to send mac command';
+      return;
+    }
+
+    final target = _writableTargetForMacCommand(deviceId);
+    if (target == null) {
+      gattStatusMessage.value =
+          'No writable characteristic — run discoverServices() first';
+      return;
+    }
+
+    macCommandSending[deviceId] = true;
+    macCommandSending.refresh();
+    gattStatusMessage.value =
+        'Sending "$_macCommandText\\n" every ${_macCommandInterval.inSeconds}s';
+
+    await _sendMacCommand(
+      deviceId,
+      target.serviceUuid,
+      target.characteristic,
+    );
+
+    _macCommandTimers[deviceId] = Timer.periodic(_macCommandInterval, (_) {
+      unawaited(_sendMacCommand(
+        deviceId,
+        target.serviceUuid,
+        target.characteristic,
+      ));
+    });
+  }
+
+  void stopMacCommandSending(String deviceId) {
+    _macCommandTimers.remove(deviceId)?.cancel();
+    if (macCommandSending.remove(deviceId) != null) {
+      macCommandSending.refresh();
+      gattStatusMessage.value = 'Stopped periodic mac command';
+    }
+  }
+
+  void _stopAllMacCommandSending() {
+    for (final deviceId in _macCommandTimers.keys.toList()) {
+      stopMacCommandSending(deviceId);
+    }
+  }
+
+  ({String serviceUuid, BleGattCharacteristic characteristic})?
+      _writableTargetForMacCommand(String deviceId) {
+    final services = discoveredServices[deviceId];
+    if (services == null || services.isEmpty) return null;
+
+    for (final service in services) {
+      for (final characteristic in service.characteristics) {
+        if (_uuidMatches(characteristic.uuid, _nordicUartRxUuid) &&
+            characteristic.canWrite) {
+          return (serviceUuid: service.uuid, characteristic: characteristic);
+        }
+      }
+    }
+
+    for (final service in services) {
+      for (final characteristic in service.characteristics) {
+        if (characteristic.canWrite) {
+          return (serviceUuid: service.uuid, characteristic: characteristic);
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _uuidMatches(String a, String b) {
+    final normalize = (String uuid) => uuid.toLowerCase().replaceAll('-', '');
+    return normalize(a) == normalize(b);
+  }
+
+  Future<void> _sendMacCommand(
+    String deviceId,
+    String serviceUuid,
+    BleGattCharacteristic characteristic,
+  ) async {
+    if (!isMacCommandSending(deviceId)) return;
+    if (connectionStates[deviceId] != BleConnectionState.connected) {
+      stopMacCommandSending(deviceId);
+      return;
+    }
+
+    await writeStringFor(
+      deviceId,
+      serviceUuid,
+      characteristic,
+      _macCommandText,
+      lineEnding: _macCommandLineEnding,
+    );
   }
 
   // — Connection queries —

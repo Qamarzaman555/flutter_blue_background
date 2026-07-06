@@ -230,6 +230,22 @@ class DeviceDetailScreen extends StatelessWidget {
           ],
         );
       }),
+      floatingActionButton: Obx(() {
+        final connectionState = controller.connectionStates[deviceId] ??
+            BleConnectionState.disconnected;
+        final isConnected = connectionState == BleConnectionState.connected;
+        final sending = controller.isMacCommandSending(deviceId);
+        final canSend = isConnected &&
+            controller.hasWritableCharacteristicForMacCommand(deviceId);
+
+        return FloatingActionButton.extended(
+          onPressed: canSend
+              ? () => controller.toggleMacCommandSending(deviceId)
+              : null,
+          icon: Icon(sending ? Icons.stop : Icons.play_arrow),
+          label: Text(sending ? 'Stop command/s' : 'Send command/s'),
+        );
+      }),
     );
   }
 }
@@ -291,8 +307,7 @@ Future<void> _promptWrite(
               ),
               RadioGroup<String>(
                 groupValue: lineEnding,
-                onChanged: (value) =>
-                    setState(() => lineEnding = value ?? ''),
+                onChanged: (value) => setState(() => lineEnding = value ?? ''),
                 child: Column(
                   children: [
                     RadioListTile<String>(
