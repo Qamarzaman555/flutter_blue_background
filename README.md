@@ -1,302 +1,130 @@
 # Flutter Blue Background
 
-A professional, generic Flutter package for enabling BLE (Bluetooth Low Energy) functionality in background services for both Android and iOS platforms.
+A Flutter plugin for **Bluetooth Low Energy (BLE)** that keeps scanning, connecting, and GATT operations alive while your app is in the background — on **Android** and **iOS**.
+
+`flutter_blue_background` is designed for apps that need reliable peripheral communication when the UI is not visible: wearables, sensors, medical devices, asset trackers, and similar use cases. The API is intentionally aligned with [flutter_blue_plus](https://pub.dev/packages/flutter_blue_plus) naming and semantics where practical, so migration is straightforward.
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Installation](#installation)
+- [Platform setup](#platform-setup)
+- [Permissions](#permissions)
+- [Quick start](#quick-start)
+- [Typical workflow](#typical-workflow)
+- [API reference](#api-reference)
+- [Configuration](#configuration)
+- [Data models](#data-models)
+- [Streams](#streams)
+- [Background behavior](#background-behavior)
+- [Logging](#logging)
+- [Error handling](#error-handling)
+- [Example app](#example-app)
+- [Limitations & best practices](#limitations--best-practices)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
 
 ## Features
 
-- 🔄 **Generic Configuration**: Highly configurable BLE service with support for custom UUIDs, device names, and connection parameters
-- 🔋 **Battery Monitoring**: Built-in battery level and health monitoring with customizable thresholds
-- 📱 **Cross-Platform**: Works on both Android and iOS with platform-specific optimizations
-- 🔔 **Smart Notifications**: Configurable notification system with customizable importance levels
-- 📊 **Data Management**: Built-in data storage and retrieval with automatic cleanup
-- 🔌 **Auto-Reconnection**: Automatic device reconnection with configurable timeouts
-- 🎯 **Callback System**: Comprehensive callback system for handling device events, data, and errors
-- 🔧 **Legacy Support**: Backward compatibility with existing implementations
+- **Background BLE** — Android foreground service (`connectedDevice` type) and iOS `bluetooth-central` background mode keep the stack active when the app is backgrounded.
+- **Scan** — Filter by service UUID, name, RSSI; platform-specific tuning for Android and iOS.
+- **Connect / disconnect** — Direct or auto-connect; configurable timeouts and platform options.
+- **GATT** — Service discovery, read, write, notifications/indications.
+- **Streams** — Real-time adapter state, scan results, connection state, and characteristic values.
+- **Cached scan results** — On Android, devices found while the UI was away are available via `getScanResults()`.
+- **Serialized GATT ops** — Per-device mutex prevents overlapping read/write/notify calls.
+- **Boot restart (Android)** — Service can restart after reboot if it was running before.
+- **Logging** — Dart and native log levels with an in-app log stream.
+- **Cross-platform models** — `BleAdapterState`, `BleConnectionState`, and scan result fields aligned with flutter_blue_plus.
+
+---
+
+## How it works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Flutter (Dart)                          │
+│  FlutterBlueBackground                                      │
+│    • startService / stopService                             │
+│    • startScan / connect / GATT ops                         │
+│    • Streams: adapterState, scanResults, connectionState,   │
+│               characteristicValues                          │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ Method + Event channels
+         ┌─────────────────┴─────────────────┐
+         ▼                                   ▼
+┌─────────────────────┐           ┌─────────────────────┐
+│      Android        │           │        iOS          │
+│ Foreground service  │           │ BackgroundService   │
+│  + BleScanner       │           │  + BleScanner       │
+│  + BleConnector     │           │  + BleConnector     │
+│  + BootReceiver     │           │  (bluetooth-central)│
+└─────────────────────┘           └─────────────────────┘
+```
+
+**Android** runs BLE inside a long-lived foreground service with a persistent notification, wake lock, and periodic keep-alive. Scan and connect intents are handled natively so work continues when the Flutter isolate is suspended.
+
+**iOS** relies on the host app declaring `bluetooth-central` in `UIBackgroundModes`. The plugin holds `UIApplication` background tasks during foreground/background transitions. There is no Android-style notification on iOS.
+
+**Important:** Scanning and connecting require `startService()` to be running first. The plugin does not implicitly start the service.
+
+---
 
 ## Installation
 
-Add this to your package's `pubspec.yaml` file:
+Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
   flutter_blue_background: ^0.0.2
 ```
 
-## Quick Start
-
-### 1. Basic Usage
+Import:
 
 ```dart
 import 'package:flutter_blue_background/flutter_blue_background.dart';
-
-// Create configuration
-final config = BleConfig(
-  serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  sendCharacteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-  receiveCharacteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
-  deviceName: 'Your Device Name',
-  autoReconnect: true,
-  enableBatteryMonitoring: true,
-);
-
-// Initialize and start service
-await FlutterBlueBackground.initialize(config: config);
-await FlutterBlueBackground.start();
 ```
 
-### 2. Advanced Configuration
+Create an instance (methods are instance-based, not static):
 
 ```dart
-final config = BleConfig(
-  serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  sendCharacteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-  receiveCharacteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
-  deviceName: 'My BLE Device',
-  deviceId: 'AA:BB:CC:DD:EE:FF', // Optional, takes precedence over deviceName
-  autoReconnect: true,
-  scanTimeoutSeconds: 15,
-  connectionTimeoutSeconds: 30,
-  mtuSize: 512,
-  enableBatteryMonitoring: true,
-  enableBatteryHealthCalculation: true,
-  batteryHealthThreshold: 30,
-  batteryCapacity: 3000.0, // mAh
-  chargeLimit: 98,
-  enableCustomChargeLimit: true,
-  notificationConfig: const NotificationConfig(
-    channelId: 'my_ble_service',
-    channelName: 'My BLE Service',
-    channelDescription: 'Background BLE communication service',
-    title: 'BLE Service',
-    content: 'Service is running',
-    importance: NotificationImportance.low,
-    showBadge: false,
-    enableVibration: false,
-    enableLights: false,
-    playSound: false,
-  ),
-  dataProcessingConfig: const DataProcessingConfig(
-    enableLogging: true,
-    maxDataEntries: 1000,
-    processingIntervalSeconds: 1,
-    enableDataFiltering: false,
-    enableDataValidation: true,
-  ),
-);
+final ble = FlutterBlueBackground();
 ```
 
-### 3. Using Callbacks
+---
 
-```dart
-final callbacks = BleCallbacks(
-  onDeviceConnection: (device, isConnected) {
-    print('Device ${device.platformName} ${isConnected ? 'connected' : 'disconnected'}');
-  },
-  onDataReceived: (data, characteristicUuid) {
-    print('Received: ${String.fromCharCodes(data)} from $characteristicUuid');
-  },
-  onDataSent: (data, characteristicUuid) {
-    print('Sent: $data to $characteristicUuid');
-  },
-  onBatteryEvent: (event) {
-    print('Battery event: $event');
-  },
-  onServiceEvent: (event) {
-    print('Service event: $event');
-  },
-  onError: (error, exception) {
-    print('Error: $error');
-  },
-  onDataProcessing: (rawData) {
-    // Custom data processing
-    try {
-      return String.fromCharCodes(rawData);
-    } catch (e) {
-      return null;
-    }
-  },
-);
-
-await FlutterBlueBackground.initialize(
-  config: config,
-  callbacks: callbacks,
-);
-```
-
-## API Reference
-
-### Core Methods
-
-#### `initialize({required BleConfig config, BleCallbacks? callbacks})`
-Initialize the BLE background service with configuration and optional callbacks.
-
-#### `start()`
-Start the background service.
-
-#### `stop()`
-Stop the background service.
-
-#### `isRunning()`
-Check if the service is currently running.
-
-#### `sendData(String data)`
-Send data to the connected device.
-
-#### `getReceivedData()`
-Get all received data as a list of `BleData` objects.
-
-#### `getBatteryData()`
-Get battery monitoring data as a list of `BatteryData` objects.
-
-#### `clearReceivedData()`
-Clear all stored received data.
-
-#### `getServiceStatus()`
-Get current service status information.
-
-### Configuration Classes
-
-#### `BleConfig`
-Main configuration class for the BLE service.
-
-**Properties:**
-- `serviceUuid`: BLE service UUID
-- `sendCharacteristicUuid`: Characteristic UUID for sending data
-- `receiveCharacteristicUuid`: Characteristic UUID for receiving data
-- `deviceName`: Device name to connect to (optional)
-- `deviceId`: Device ID to connect to (optional, takes precedence)
-- `autoReconnect`: Enable automatic reconnection
-- `scanTimeoutSeconds`: Scan timeout in seconds
-- `connectionTimeoutSeconds`: Connection timeout in seconds
-- `mtuSize`: MTU size for Android
-- `enableBatteryMonitoring`: Enable battery monitoring
-- `enableBatteryHealthCalculation`: Enable battery health calculation
-- `batteryHealthThreshold`: Battery health calculation threshold
-- `batteryCapacity`: Battery capacity in mAh
-- `chargeLimit`: Charge limit percentage
-- `enableCustomChargeLimit`: Enable custom charge limit
-- `notificationConfig`: Notification configuration
-- `dataProcessingConfig`: Data processing configuration
-
-#### `NotificationConfig`
-Configuration for notifications.
-
-**Properties:**
-- `channelId`: Notification channel ID
-- `channelName`: Notification channel name
-- `channelDescription`: Notification channel description
-- `importance`: Notification importance level
-- `showBadge`: Show notification badge
-- `enableVibration`: Enable vibration
-- `enableLights`: Enable LED lights
-- `playSound`: Play notification sound
-- `title`: Notification title
-- `content`: Notification content
-- `notificationId`: Notification ID
-- `updateIntervalSeconds`: Update interval in seconds
-
-#### `DataProcessingConfig`
-Configuration for data processing.
-
-**Properties:**
-- `enableLogging`: Enable data logging
-- `maxDataEntries`: Maximum number of data entries to keep
-- `processingIntervalSeconds`: Data processing interval
-- `enableDataFiltering`: Enable data filtering
-- `enableDataValidation`: Enable data validation
-
-### Data Models
-
-#### `BleData`
-Represents received BLE data.
-
-**Properties:**
-- `characteristicUuid`: Characteristic UUID
-- `rawData`: Raw data bytes
-- `processedData`: Processed data string
-- `timestamp`: Data timestamp
-- `deviceId`: Device ID
-- `deviceName`: Device name
-
-#### `BatteryData`
-Represents battery monitoring data.
-
-**Properties:**
-- `level`: Battery level percentage
-- `state`: Battery state (charging/discharging)
-- `health`: Battery health percentage
-- `mah`: Current in mAh
-- `timestamp`: Data timestamp
-- `deviceId`: Device ID
-
-#### `ServiceStatusData`
-Represents service status information.
-
-**Properties:**
-- `isRunning`: Service running status
-- `isForeground`: Foreground service status
-- `lastUpdate`: Last update timestamp
-- `metadata`: Additional metadata
-
-### Callback Types
-
-#### `DeviceConnectionCallback`
-Called when device connects or disconnects.
-
-#### `DataReceivedCallback`
-Called when data is received from a characteristic.
-
-#### `DataSentCallback`
-Called when data is successfully sent.
-
-#### `ScanResultCallback`
-Called when scan results are available.
-
-#### `BatteryEventCallback`
-Called when battery events occur.
-
-#### `ServiceEventCallback`
-Called when service events occur.
-
-#### `ErrorCallback`
-Called when errors occur.
-
-#### `DataProcessingCallback`
-Called to process raw data before storing.
-
-## Platform-Specific Setup
+## Platform setup
 
 ### Android
 
-1. Add permissions to `android/app/src/main/AndroidManifest.xml`:
+The plugin merges these into your app manifest automatically:
+
+- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CONNECTED_DEVICE`
+- `BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN` (with `neverForLocation`)
+- `POST_NOTIFICATIONS`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`
+- Legacy `BLUETOOTH` / `BLUETOOTH_ADMIN` and `ACCESS_FINE_LOCATION` (API ≤ 30)
+
+Your **app** manifest should declare runtime permissions you intend to request (see [Permissions](#permissions)). The example app includes:
 
 ```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
-<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-<uses-permission android:name="android.permission.BATTERY_STATS" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+<uses-permission
+    android:name="android.permission.BLUETOOTH_SCAN"
+    android:usesPermissionFlags="neverForLocation"
+    tools:targetApi="s"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 ```
 
-2. Add service declaration to `android/app/src/main/AndroidManifest.xml`:
-
-```xml
-<service
-    android:name="id.flutter.flutter_background_service.BackgroundService"
-    android:foregroundServiceType="dataSync"
-    android:exported="false" />
-```
+No extra service declaration is needed in the app — the plugin registers `FlutterBlueBackgroundService` with `foregroundServiceType="connectedDevice"`.
 
 ### iOS
 
-1. Add capabilities in Xcode:
-   - Background Modes
-   - Bluetooth LE
+1. In Xcode, enable **Background Modes** → **Uses Bluetooth LE accessories**.
 
 2. Add to `ios/Runner/Info.plist`:
 
@@ -304,46 +132,323 @@ Called to process raw data before storing.
 <key>UIBackgroundModes</key>
 <array>
     <string>bluetooth-central</string>
-    <string>background-fetch</string>
 </array>
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app uses Bluetooth to communicate with nearby devices in the background.</string>
 ```
 
-## Legacy Support
+`NSBluetoothPeripheralUsageDescription` is included for older iOS versions.
 
-The package maintains backward compatibility with existing implementations:
+---
+
+## Permissions
+
+| Platform | What you need |
+|----------|----------------|
+| **Android 12+** | `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` at runtime. `POST_NOTIFICATIONS` for the foreground service notification. |
+| **Android ≤ 11** | Location permission may be required for scanning (plugin declares `ACCESS_FINE_LOCATION` for API ≤ 30). |
+| **iOS** | System prompts via `NSBluetoothAlwaysUsageDescription` when CoreBluetooth is first used. No separate notification permission for BLE. |
+
+The [example app](example/) uses [`permission_handler`](https://pub.dev/packages/permission_handler) to request Android permissions before `startService()`.
+
+---
+
+## Quick start
 
 ```dart
-// Legacy methods still work
-await FlutterBlueBackground.connectToDevice(
-  deviceName: 'My Device',
-  serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  characteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-);
+import 'package:flutter_blue_background/flutter_blue_background.dart';
 
-await FlutterBlueBackground.writeData(
-  serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  characteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
-  data: 'Hello World',
-);
+final ble = FlutterBlueBackground();
 
-final data = await FlutterBlueBackground.readData(
-  serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
-  characteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
-);
+Future<void> runBle() async {
+  // 1. Optional: enable verbose logging
+  await FlutterBlueBackground.setLogLevel(FbbLogLevel.debug);
+
+  // 2. Start the background service (required before scan/connect)
+  await ble.startService(
+    notificationTitle: 'My BLE App',
+    notificationContent: 'Connected to device',
+  );
+
+  // 3. Listen for discoveries
+  ble.scanResults.listen((result) {
+    print('Found: ${result.displayName} (${result.rssi} dBm)');
+  });
+
+  // 4. Start scanning
+  await ble.startScan(const ScanConfig(
+    serviceUuids: ['6e400001-b5a3-f393-e0a9-e50e24dcca9e'],
+    skipUnnamedDevices: true,
+  ));
+
+  // 5. Connect when you have a deviceId from a scan result
+  const deviceId = 'AA:BB:CC:DD:EE:FF'; // MAC on Android; UUID on iOS
+
+  ble.connectionState.listen((event) async {
+    if (event.state == BleConnectionState.connected) {
+      final services = await ble.discoverServices(deviceId);
+      print('Discovered ${services.length} services');
+    }
+  });
+
+  await ble.connect(deviceId);
+
+  // 6. Read / write / subscribe
+  const charId = BleCharacteristicId(
+    serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    characteristicUuid: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+  );
+
+  ble.onCharacteristicReceived(deviceId, charId).listen((event) {
+    print('Notification: ${event.value}');
+  });
+
+  await ble.setNotifyValue(deviceId, charId, true);
+  await ble.writeCharacteristic(
+    deviceId,
+    BleCharacteristicId(
+      serviceUuid: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+      characteristicUuid: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+    ),
+    [0x01, 0x02],
+  );
+}
 ```
 
-## Example
+---
 
-See the `example/` directory for a complete example application demonstrating all features.
+## Typical workflow
+
+1. **Request permissions** (Android) — before any BLE work.
+2. **`startService()`** — must succeed before scan or connect.
+3. **Subscribe to streams** — `adapterState`, `scanResults`, `connectionState`, `characteristicValues`.
+4. **`startScan(ScanConfig)`** — discover peripherals; use `deviceId` from `BleScanResult`.
+5. **`connect(deviceId, ConnectConfig)`** — wait for `BleConnectionState.connected` on `connectionState`.
+6. **`discoverServices(deviceId)`** — inspect GATT tree; read/write/notify as needed.
+7. **`stopScan()`** / **`disconnect()`** / **`stopService()`** when finished.
+
+On app resume, call `isServiceRunning()`, `isScanning()`, `getScanResults()`, and `getConnectedDevices()` to reconcile UI state with native reality.
+
+---
+
+## API reference
+
+### `FlutterBlueBackground`
+
+| Method / property | Description |
+|-------------------|-------------|
+| `setLogLevel(level, {color})` | Static. Sets Dart + native log verbosity. |
+| `logLevel` | Static. Current `FbbLogLevel`. |
+| `logs` | Static. `Stream<String>` of plain-text log lines. |
+| `getPlatformVersion()` | Native OS version string. |
+| `startService({notificationTitle, notificationContent})` | Start background service. Returns `false` on failure. |
+| `stopService()` | Stop service; tears down scan and connections on iOS. |
+| `isServiceRunning()` | Whether the service is active. |
+| `getAdapterState()` | One-shot adapter (radio) state. |
+| `adapterState` | `Stream<BleAdapterState>`. |
+| `startScan([ScanConfig])` | Start BLE scan. Restarts if already scanning. Requires service. |
+| `stopScan()` | Stop scan. |
+| `isScanning()` | Whether a scan is in progress. |
+| `scanResults` | `Stream<BleScanResult>`. |
+| `getScanResults()` | Cached results from current/recent scan. |
+| `clearScanResults()` | Clear cache. |
+| `connect(deviceId, [ConnectConfig])` | Connect to peripheral. Requires service. |
+| `disconnect(deviceId, [DisconnectConfig])` | Disconnect. |
+| `getConnectionState(deviceId)` | Cached state for one device. |
+| `getConnectedDevices()` | List of connected `deviceId`s. |
+| `connectionState` | `Stream<BleConnectionEvent>`. |
+| `requestMtu(deviceId, mtu)` | Request ATT MTU (Android). iOS reports negotiated MTU via events. |
+| `requestConnectionPriority(deviceId, priority)` | Android only. |
+| `discoverServices(deviceId, {timeout, subscribeToServicesChanged})` | GATT service discovery. |
+| `readCharacteristic(deviceId, characteristic, {timeout})` | Read value. Serialized per device. |
+| `writeCharacteristic(deviceId, characteristic, value, {withoutResponse, timeout})` | Write value. |
+| `setNotifyValue(deviceId, characteristic, enable, {forceIndications, timeout})` | Enable/disable CCCD. |
+| `characteristicValues` | All read/write/notification events. |
+| `characteristicValuesFor(deviceId, characteristic, {sources})` | Filtered stream. |
+| `onCharacteristicReceived(deviceId, characteristic)` | Notifications only (FBP-style). |
+
+---
+
+## Configuration
+
+### `ScanConfig`
+
+Cross-platform fields:
+
+| Field | Description |
+|-------|-------------|
+| `serviceUuids` | Native filter. **Required for iOS background scan delivery.** |
+| `nameFilter` | Case-insensitive substring on advertised name (client-side). |
+| `skipUnnamedDevices` | Drop devices with no local name in the advertisement. |
+| `rssiThreshold` | Drop weak signals (dBm, client-side). |
+| `reportDelay` | Android batch interval. |
+| `timeout` | Auto-stop after duration; `null` = until `stopScan()`. |
+| `android` | `AndroidScanSettings` — scan mode, callback type, PHY, etc. |
+| `ios` | `IosScanOptions` — `allowDuplicates`, `solicitedServiceUuids`. |
+
+### `ConnectConfig`
+
+| Field | Description |
+|-------|-------------|
+| `timeout` | Direct connect timeout (ignored when `autoConnect` is true). |
+| `autoConnect` | OS-managed reconnection; listen on `connectionState`. |
+| `discoverServicesOnConnect` | Auto discovery after connect (default `true`). |
+| `serviceUuids` | Optional discovery filter. |
+| `subscribeToServicesChanged` | Subscribe to GAP Services Changed (0x2A05). |
+| `android` | `AndroidConnectOptions` — transport, PHY, MTU, priority. |
+| `ios` | `IosConnectOptions` — auto-reconnect (iOS 17+), suspend alerts. |
+
+When `autoConnect` is `true`, do not set `android.mtu` at connect time — call `requestMtu()` after connected.
+
+### `DisconnectConfig`
+
+| Field | Description |
+|-------|-------------|
+| `timeout` | Wait for disconnected state. |
+| `androidDelayMillis` | Minimum gap after recent connect (GATT race workaround). |
+
+---
+
+## Data models
+
+### `BleScanResult`
+
+| Field | Notes |
+|-------|-------|
+| `deviceId` | **Android:** MAC address. **iOS:** `CBPeripheral` UUID (not MAC). |
+| `advName` | Local name from advertisement only. |
+| `platformName` | Bonded/cached name. |
+| `displayName` | `advName` → `platformName` → `deviceId`. |
+| `rssi`, `txPowerLevel`, `connectable` | Signal and connectability. |
+| `manufacturerData`, `serviceUuids`, `serviceData` | Advertisement payload. |
+
+### `BleConnectionEvent`
+
+`deviceId`, `state` (`BleConnectionState`), optional `mtu`, `errorMessage`, `errorCode`.
+
+### `BleGattService` / `BleGattCharacteristic`
+
+Service and characteristic UUIDs, properties (`read`, `write`, `notify`, …), descriptors.
+
+### `BleCharacteristicId`
+
+`serviceUuid`, `characteristicUuid`, `instanceId` (Android duplicate characteristics).
+
+### `BleCharacteristicValueEvent`
+
+`value`, `source` (`read` | `write` | `notification`), `success`, error fields.
+
+### `BleAdapterState`
+
+`unknown`, `unsupported`, `unauthorized`, `off`, `turningOn`, `on`, `turningOff`.
+
+Use `isOn`, `canScan`, `canConnect`, and `requiresBleTeardown` helpers.
+
+---
+
+## Streams
+
+| Stream | Emits |
+|--------|-------|
+| `adapterState` | Radio on/off/unauthorized transitions. |
+| `scanResults` | Each matching advertisement (may be filtered client-side). |
+| `connectionState` | Connect, disconnect, MTU updates. |
+| `characteristicValues` | Reads, write confirmations, notifications. |
+
+Subscribe **before** starting scan/connect to avoid missing early events. Streams are broadcast; multiple listeners are supported.
+
+---
+
+## Background behavior
+
+### Android
+
+- Foreground notification is shown while the service runs. Customize text via `startService(notificationTitle:, notificationContent:)`.
+- Scan continues in the service when the app is backgrounded. Use `getScanResults()` when returning to the foreground.
+- `BootReceiver` restarts the service after reboot **only if** it was running when the device shut down.
+- Adapter off/unauthorized triggers native teardown: scans stop, GATT links close, `disconnected` events fire.
+
+### iOS
+
+- Background scan delivery requires peripherals to advertise a UUID listed in `ScanConfig.serviceUuids`.
+- In background, iOS delivers **one** scan event per device (duplicates suppressed) unless in foreground with `allowDuplicates: true`.
+- `deviceId` is an opaque UUID — store it to reconnect to the same peripheral later.
+- Long-lived BLE in background depends on `bluetooth-central`; the plugin's `BackgroundService` adds short `beginBackgroundTask` extensions during transitions.
+
+---
+
+## Logging
+
+```dart
+await FlutterBlueBackground.setLogLevel(FbbLogLevel.verbose, color: true);
+
+FlutterBlueBackground.logs.listen(print); // in-app debug console
+```
+
+Levels: `none`, `error`, `warning`, `info`, `debug`, `verbose` (matches flutter_blue_plus ordering).
+
+At `verbose`, method-channel calls and results are logged in the Dart console.
+
+---
+
+## Error handling
+
+GATT operations throw `FbbException` with `method`, `message`, and optional `errorCode`:
+
+```dart
+try {
+  await ble.readCharacteristic(deviceId, charId);
+} on FbbException catch (e) {
+  print('${e.method}: ${e.message}');
+}
+```
+
+`connect()` and `startScan()` return `false` on failure (service stopped, Bluetooth off, permissions missing) rather than throwing.
+
+Connection failures include `errorMessage` / `errorCode` on `BleConnectionEvent`.
+
+---
+
+## Example app
+
+The [`example/`](example/) project is a full demo with four tabs:
+
+| Tab | Demonstrates |
+|-----|----------------|
+| **Service** | Start/stop service, notification updates |
+| **Adapter** | Adapter state stream and polling |
+| **Scan** | Scan config, live results, cached results, connect |
+| **Connection** | Query connection state, GATT tree, read/write/notify |
+
+Run from the example directory:
+
+```bash
+cd example
+flutter run
+```
+
+Key reference: [`example/lib/ble/ble_controller.dart`](example/lib/ble/ble_controller.dart).
+
+---
+
+## Limitations & best practices
+
+1. **Always start the service first** — `startScan` and `connect` return `false` otherwise.
+2. **Filter service UUIDs on iOS** — especially for background scanning.
+3. **Use `deviceId` from scan results** — do not assume MAC addresses on iOS.
+4. **One GATT operation at a time per device** — enforced by the plugin; queue higher-level logic if needed.
+5. **Handle `requiresBleTeardown`** — when the adapter turns off, clear local connection UI state.
+6. **Battery** — background BLE is power-intensive; use scan timeouts, RSSI thresholds, and stop scan when connected.
+7. **Not a drop-in replacement for flutter_blue_plus in foreground-only apps** — this plugin optimizes for background lifecycle and native service ownership.
+
+---
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. Please open an issue or pull request on [GitHub](https://github.com/sparkleo-io/flutter_blue_background).
+
+---
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For support, please open an issue on the GitHub repository.
+MIT — see [LICENSE](LICENSE).
